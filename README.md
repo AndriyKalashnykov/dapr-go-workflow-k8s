@@ -1,2 +1,2 @@
-# workflow-recipe
-Demo of a Radius recipe implemented using Dapr workflows
+# dapr-go-workflow-k8s
+Dapr workflows k8s
