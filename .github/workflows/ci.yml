@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+
+  builds:
+
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: [ 1.23 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Build
+        run: make build
+
+  tests:
+    strategy:
+      matrix:
+        name: [unit]
+        go-version: [ 1.23 ]
+    runs-on: ubuntu-latest
+    name: test (${{ matrix.name }})
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Run ${{ matrix.name }} tests
+        run: make test
+
+  integration:
+    needs: [builds, tests]
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        name: [integration]
+        go-version: [ 1.23 ]
+        node-version: [ 20.6.0 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install Newman
+        run: |
+          npm install --location=global newman
+
+      - name: Build
+        run: make build
+
+      - name: Run
+        run: go run main.go -env-file .env &
+
+      - name: Wait for REST API
+        run: sleep 6s
+        shell: bash
+
+      - name: Run Postman/Newman end-to-end tests
+        run: make e2e
