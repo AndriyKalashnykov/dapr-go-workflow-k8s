@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dapr/durabletask-go/api"
 	"log/slog"
 	"net"
 	"net/http"
 
 	daprclient "github.com/dapr/go-sdk/client"
 	daprworkflow "github.com/dapr/go-sdk/workflow"
-	"github.com/microsoft/durabletask-go/api"
 )
 
 const (

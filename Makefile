@@ -75,11 +75,11 @@ run:
 
 #get: @ Download and install dependency packages
 get:
-	@export GOFLAGS=$(GOFLAGS); go get . ; go mod tidy
+	@export GOFLAGS=$(GOFLAGS); go get ./... ; go mod tidy
 
 #update: @ Update dependencies to latest versions
 update:
-	@export GOFLAGS=$(GOFLAGS); go get -u; go mod tidy
+	@export GOFLAGS=$(GOFLAGS); go get -u ./... ; go mod tidy
 
 #release: @ Create and push a new tag
 release: build
