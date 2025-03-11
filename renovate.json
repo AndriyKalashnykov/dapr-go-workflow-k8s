@@ -11,11 +11,6 @@
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
   "groupName": "all",
-  "force": {
-    "constraints": {
-      "go": "1.23"
-    }
-  },
   "platformAutomerge": true,
   "packageRules": [
     {
