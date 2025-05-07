@@ -3,7 +3,7 @@ module github.com/AndriyKalashnykov/dapr-go-workflow-k8s
 go 1.24
 
 require (
-	github.com/dapr/durabletask-go v0.6.5
+	github.com/dapr/durabletask-go v0.7.0
 	github.com/dapr/go-sdk v1.12.0
 	github.com/go-openapi/jsonpointer v0.21.1
 	github.com/google/uuid v1.6.0
