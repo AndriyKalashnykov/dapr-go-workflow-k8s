@@ -3,7 +3,7 @@ module github.com/AndriyKalashnykov/dapr-go-workflow-k8s
 go 1.24
 
 require (
-	github.com/dapr/durabletask-go v0.7.2
+	github.com/dapr/durabletask-go v0.8.1
 	github.com/dapr/go-sdk v1.12.0
 	github.com/go-openapi/jsonpointer v0.21.2
 	github.com/google/uuid v1.6.0
@@ -12,7 +12,7 @@ require (
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/dapr/dapr v1.15.3 // indirect
-	github.com/dapr/kit v0.15.1 // indirect
+	github.com/dapr/kit v0.15.3-0.20250616160611-598b032bce69 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/swag v0.23.1 // indirect
