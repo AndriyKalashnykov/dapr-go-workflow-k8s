@@ -1,24 +1,64 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base",
+    "config:best-practices",
+    ":approveMajorUpdates",
+    ":label(dependencies)",
+    ":semanticCommitType(chore)",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
     ":dependencyDashboard",
-    "schedule:daily"
+    "schedule:daily",
+    ":automergePatch",
+    ":automergePr",
+    ":automergeRequireAllStatusChecks",
+    ":prConcurrentLimitNone",
+    ":separatePatchReleases",
+    "replacements:all",
+    "workarounds:all"
   ],
   "postUpdateOptions": [
     "gomodTidy"
   ],
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
-  "groupName": "all",
+  "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",
   "platformAutomerge": true,
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
+  "groupName": "all",
+  "force": {
+    "constraints": {
+      "go": "< 2.0"
+    }
+  },
+  "labels": [
+    "dependencies"
+  ],
   "packageRules": [
     {
       "description": "Automerge non-major updates",
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchDatasources": ["docker", "golang-version"],
+      "matchPackageNames": ["go", "golang"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
+    },
+    {
+      "description": "Enforce bump range strategy",
+      "matchDatasources": ["docker", "golang-version"],
+      "matchPackageNames": ["go", "golang"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "Pipeline dependencies"
     }
   ]
 }
