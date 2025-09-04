@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/dapr/durabletask-go v0.8.1
 	github.com/dapr/go-sdk v1.12.0
-	github.com/go-openapi/jsonpointer v0.21.2
+	github.com/go-openapi/jsonpointer v0.22.0
 	github.com/google/uuid v1.6.0
 )
 
@@ -15,9 +15,7 @@ require (
 	github.com/dapr/kit v0.15.3-0.20250616160611-598b032bce69 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-openapi/swag v0.23.1 // indirect
-	github.com/josharian/intern v1.0.0 // indirect
-	github.com/mailru/easyjson v0.9.0 // indirect
+	github.com/go-openapi/swag/jsonname v0.24.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect
