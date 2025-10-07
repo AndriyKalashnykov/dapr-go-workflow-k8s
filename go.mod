@@ -3,19 +3,19 @@ module github.com/AndriyKalashnykov/dapr-go-workflow-k8s
 go 1.25.1
 
 require (
-	github.com/dapr/durabletask-go v0.10.0
-	github.com/dapr/go-sdk v1.12.0
-	github.com/go-openapi/jsonpointer v0.22.0
+	github.com/dapr/durabletask-go v0.10.1
+	github.com/dapr/go-sdk v1.13.0
+	github.com/go-openapi/jsonpointer v0.22.1
 	github.com/google/uuid v1.6.0
 )
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/dapr/dapr v1.15.11 // indirect
+	github.com/dapr/dapr v1.16.0 // indirect
 	github.com/dapr/kit v0.16.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-openapi/swag/jsonname v0.24.0 // indirect
+	github.com/go-openapi/swag/jsonname v0.25.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
