@@ -8,7 +8,6 @@
     "docker:pinDigests",
     "helpers:pinGitHubActionDigests",
     ":dependencyDashboard",
-    "schedule:daily",
     ":automergePatch",
     ":automergePr",
     ":automergeRequireAllStatusChecks",
@@ -27,38 +26,45 @@
   "prConcurrentLimit": 0,
   "prHourlyLimit": 0,
   "groupName": "all",
-  "force": {
-    "constraints": {
-      "go": "< 2.0"
-    }
-  },
   "labels": [
     "dependencies"
   ],
   "packageRules": [
     {
-      "description": "Automerge non-major updates",
+      "description": "Automerge major updates",
       "matchUpdateTypes": [
-        "minor",
-        "patch"
+        "major"
       ],
-      "matchDatasources": ["docker", "golang-version"],
-      "matchPackageNames": ["go", "golang"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
     },
     {
-      "description": "Enforce bump range strategy",
-      "matchDatasources": ["docker", "golang-version"],
-      "matchPackageNames": ["go", "golang"],
-      "rangeStrategy": "bump"
+      "description": "Automerge non-major updates",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest",
+        "internal",
+        "devDependencies",
+        "ref",
+        "none",
+        "security",
+        "grop",
+        "unpin"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
     },
     {
-      "matchManagers": [
-        "github-actions"
-      ],
-      "groupName": "Pipeline dependencies"
+      "description": "Automerge github-actions updates",
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
     }
   ]
 }
