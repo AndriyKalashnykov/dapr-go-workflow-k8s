@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/dapr/durabletask-go v0.10.1
 	github.com/dapr/go-sdk v1.13.0
-	github.com/go-openapi/jsonpointer v0.22.2
+	github.com/go-openapi/jsonpointer v0.22.3
 	github.com/google/uuid v1.6.0
 )
 
