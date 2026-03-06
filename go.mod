@@ -1,9 +1,9 @@
 module github.com/AndriyKalashnykov/dapr-go-workflow-k8s
 
-go 1.25.1
+go 1.26.0
 
 require (
-	github.com/dapr/durabletask-go v0.11.1
+	github.com/dapr/durabletask-go v0.11.2
 	github.com/dapr/go-sdk v1.13.0
 	github.com/go-openapi/jsonpointer v0.22.5
 	github.com/google/uuid v1.6.0
