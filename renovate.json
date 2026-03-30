@@ -5,16 +5,11 @@
     ":approveMajorUpdates",
     ":label(dependencies)",
     ":semanticCommitType(chore)",
-    "docker:pinDigests",
-    "helpers:pinGitHubActionDigests",
-    ":dependencyDashboard",
     ":automergePatch",
     ":automergePr",
     ":automergeRequireAllStatusChecks",
     ":prConcurrentLimitNone",
-    ":separatePatchReleases",
-    "replacements:all",
-    "workarounds:all"
+    ":separatePatchReleases"
   ],
   "postUpdateOptions": [
     "gomodTidy"
@@ -23,7 +18,7 @@
   "commitMessageAction": "update",
   "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",
   "platformAutomerge": true,
-  "prConcurrentLimit": 0,
+  "prConcurrentLimit": 50,
   "prHourlyLimit": 0,
   "groupName": "all",
   "labels": [
@@ -61,10 +56,37 @@
     },
     {
       "description": "Automerge github-actions updates",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
+    },
+    {
+      "description": "Wait 3 days before automerging major updates",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Group GitHub Actions into one PR",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions"
     }
-  ]
+  ],
+  "automergeType": "branch",
+  "automerge": true,
+  "ignoreTests": false,
+  "automergeStrategy": "squash",
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "automerge": true,
+    "minimumReleaseAge": "0 days"
+  }
 }
