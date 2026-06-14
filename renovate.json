@@ -4,8 +4,18 @@
     "config:best-practices",
     ":semanticCommitType(chore)"
   ],
-  "enabledManagers": ["gomod", "github-actions", "dockerfile", "mise"],
+  "enabledManagers": ["gomod", "github-actions", "dockerfile", "mise", "custom.regex"],
   "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track Makefile tool versions via inline # renovate: comments",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: extractVersion=(?<extractVersion>[^\\s]+))?(?: registryUrl=(?<registryUrl>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\n[A-Z0-9_]+\\s*[?:]?=\\s*(?<currentValue>[^\\s]+)"
+      ]
+    }
+  ],
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
   "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",

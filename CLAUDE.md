@@ -56,10 +56,11 @@ make postgres-stop
 
 `run-dapr.sh` points Dapr at `components/` (a `state.postgresql` statestore + a tracing `Configuration` wiring Zipkin at `localhost:9411`). All host/port values are env-driven (see `.env.example`).
 
-## Testing notes & gaps
+## Testing notes
 
-- **Unit-tested**: `pkg/recipes` (100%), `pkg/activities` activity funcs (via a fake `ActivityContext`), `pkg/server` (DTO, `Address`, handlers, `Start` lifecycle), `cmd/healthcheck`. `COVERAGE_THRESHOLD` defaults to **40%** because the workflow-orchestration funcs and their `Call*` activity wrappers require a live Dapr sidecar (e2e), not unit tests.
-- **NOT automated**: the end-to-end workflow path (worker → activities → status). It needs a running Dapr sidecar + scheduler + statestore; CI does not spin that up, so the `docker` job build+scans the image but does not smoke-test it standalone (the app exits if it can't reach a sidecar). Verify manually with the loop above.
+- **Unit-tested**: `pkg/recipes` (100%), `pkg/activities` activity funcs (via a fake `ActivityContext`), `pkg/server` (DTO, `Address`, handlers, `Start` lifecycle), `cmd/healthcheck`. `COVERAGE_THRESHOLD` defaults to **40%** because the workflow-orchestration funcs and their `Call*` activity wrappers are covered by `make e2e`, not unit tests.
+- **`make e2e`** is the real end-to-end test: it `dapr init`s a control plane (placement + scheduler + state infra), starts PostgreSQL (waits for readiness), runs the app under a Dapr sidecar, schedules `PostgresSQLDatabasesPut` over the REST API, polls to `COMPLETED`, and asserts the recipe output shape (`e2e/e2e-test.sh`). It runs in CI (the `e2e` job) and locally.
+- **Dapr runtime ≥ 1.18 is required** (`DAPR_RUNTIME_VERSION`, default 1.18.0). go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes with `required metadata dapr-callee-app-id ... not found`.
 
 ## Skills
 
