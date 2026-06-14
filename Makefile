@@ -11,10 +11,19 @@ GO_VERSION     := $(shell grep -oP '^go \K[0-9]+\.[0-9]+\.[0-9]+' go.mod)
 
 # Coverage gate (percentage). The unit-testable surface (recipes, activities,
 # server, healthcheck) is well covered; the workflow-orchestration funcs and
-# their `Call*` activity wrappers require a live Dapr sidecar (validated by
-# start-workflow.sh against a running sidecar, not by unit tests), so the total
-# floor is set accordingly. Tunable via env or `make COVERAGE_THRESHOLD=85`.
+# their `Call*` activity wrappers are exercised by `make e2e` against a live
+# Dapr sidecar, not by unit tests, so the unit floor is set accordingly.
+# Tunable via env or `make COVERAGE_THRESHOLD=85`.
 COVERAGE_THRESHOLD ?= 40
+
+# Dapr runtime version installed by `make e2e-deps` (see .env.example).
+DAPR_RUNTIME_VERSION ?= 1.18.0
+
+# App HTTP port (mirrors .env.example APP_PORT). `?=` lets the env / CLI override.
+APP_PORT ?= 7999
+
+# renovate: datasource=docker depName=minlag/mermaid-cli
+MERMAID_CLI_VERSION := 11.15.0
 
 # Container image — `:=` (not `?=`) so an exported DOCKER_REGISTRY/REGISTRY_OWNER
 # in the shell can't silently redirect a publish to the wrong registry. A
@@ -79,16 +88,18 @@ update: deps
 format: deps
 	@golangci-lint fmt ./...
 
-#lint: @ Run golangci-lint, go mod tidy check, and hadolint
+#lint: @ Run golangci-lint, go mod tidy check, hadolint, and script +x guard
 lint: deps
 	@golangci-lint run ./...
 	@export GOFLAGS=$(GOFLAGS); go mod tidy && git diff --exit-code go.mod go.sum || { echo "ERROR: go.mod/go.sum not tidy. Run 'go mod tidy'."; exit 1; }
 	@hadolint Dockerfile
+	@nonexec=$$(find . -path ./.git -prune -o -name '*.sh' -not -executable -print); \
+		if [ -n "$$nonexec" ]; then echo "ERROR: shell scripts missing +x:"; echo "$$nonexec" | sed 's/^/  /'; exit 1; fi
 
 #lint-ci: @ Lint GitHub Actions workflows (actionlint + shellcheck)
 lint-ci: deps
 	@actionlint
-	@shellcheck run-dapr.sh run-postgres.sh start-workflow.sh db/init-db.sh
+	@shellcheck run-dapr.sh run-postgres.sh start-workflow.sh db/init-db.sh e2e/e2e-test.sh
 
 #vulncheck: @ Check for known vulnerabilities in dependencies
 vulncheck: deps
@@ -102,8 +113,26 @@ secrets: deps
 trivy-fs: deps
 	@trivy fs --scanners vuln,secret,misconfig --severity CRITICAL,HIGH --exit-code 1 .
 
-#static-check: @ Composite quality gate (alignment + workflow lint + lint + vuln + secrets + trivy)
-static-check: check-go-alignment lint-ci lint vulncheck secrets trivy-fs
+#mermaid-lint: @ Validate Mermaid diagrams in markdown (same engine GitHub renders with)
+mermaid-lint:
+	@command -v docker >/dev/null 2>&1 || { echo "ERROR: docker required for mermaid-lint"; exit 1; }
+	@set -euo pipefail; \
+	MD=$$(grep -lF '```mermaid' README.md CLAUDE.md 2>/dev/null || true); \
+	if [ -z "$$MD" ]; then echo "No Mermaid blocks found — skipping."; exit 0; fi; \
+	IMG=minlag/mermaid-cli:$(MERMAID_CLI_VERSION); \
+	for a in 1 2 3; do docker pull --quiet "$$IMG" >/dev/null 2>&1 && break; [ $$a -eq 3 ] && { echo "ERROR: docker pull $$IMG failed"; exit 1; }; sleep $$((a*5)); done; \
+	rc=0; \
+	for md in $$MD; do \
+		log=$$(mktemp); \
+		if docker run --rm -v "$$PWD:/data:ro" "$$IMG" -i "/data/$$md" -o "/tmp/$$(basename $$md .md).svg" >"$$log" 2>&1; then \
+			echo "  ✓ $$md"; \
+		else echo "  ✗ $$md"; sed 's/^/    /' "$$log"; rc=1; fi; \
+		rm -f "$$log"; \
+	done; \
+	exit $$rc
+
+#static-check: @ Composite quality gate (alignment + workflow lint + lint + vuln + secrets + trivy + mermaid)
+static-check: check-go-alignment lint-ci lint vulncheck secrets trivy-fs mermaid-lint
 	@echo "Static check passed."
 
 #test: @ Run unit tests with race detector and coverage
@@ -116,6 +145,24 @@ coverage-check: deps
 	@total=$$(go tool cover -func=coverage.out | grep '^total:' | grep -oE '[0-9]+\.[0-9]+'); \
 	echo "Total coverage: $$total% (threshold: $(COVERAGE_THRESHOLD)%)"; \
 	awk -v t="$$total" -v g="$(COVERAGE_THRESHOLD)" 'BEGIN { exit (t+0 >= g+0) ? 0 : 1 }' || { echo "ERROR: coverage below threshold"; exit 1; }
+
+#e2e-deps: @ Ensure the Dapr control plane (placement + scheduler containers) is up
+e2e-deps: deps
+	@command -v dapr >/dev/null 2>&1 || { echo "Error: dapr CLI required (mise install)."; exit 1; }
+	@# `dapr init` (Docker mode) runs placement/scheduler as CONTAINERS, so detect
+	@# the control plane by container, not by binary. If it's down, init; if a prior
+	@# install left the daprd binary (init refuses), self-heal with uninstall+reinit.
+	@if ! docker ps --format '{{.Names}}' | grep -qE '^dapr_scheduler$$'; then \
+		echo "Initializing Dapr runtime $(DAPR_RUNTIME_VERSION)..."; \
+		dapr init --runtime-version $(DAPR_RUNTIME_VERSION) || { \
+			dapr uninstall --all >/dev/null 2>&1; \
+			dapr init --runtime-version $(DAPR_RUNTIME_VERSION); \
+		}; \
+	fi
+
+#e2e: @ End-to-end test: run the workflow through a real Dapr sidecar
+e2e: build e2e-deps postgres-start
+	@bash e2e/e2e-test.sh; rc=$$?; $(MAKE) --no-print-directory postgres-stop; exit $$rc
 
 #build: @ Build linux/amd64 binary to ./cmd/main
 build: deps
@@ -139,7 +186,7 @@ image-build:
 
 #image-run: @ Run the container image locally (needs a Dapr sidecar to be healthy)
 image-run: image-stop
-	@docker run --rm -p 7999:7999 --name $(APP_NAME) $(IMAGE_NAME):$(IMAGE_TAG)
+	@docker run --rm -p $(APP_PORT):$(APP_PORT) -e APP_PORT=$(APP_PORT) --name $(APP_NAME) $(IMAGE_NAME):$(IMAGE_TAG)
 
 #image-stop: @ Stop the local container
 image-stop:
@@ -192,6 +239,6 @@ version:
 	@echo $(CURRENTTAG)
 
 .PHONY: help deps deps-check check-go-alignment clean get update format lint lint-ci \
-	vulncheck secrets trivy-fs static-check test coverage-check build run \
+	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check e2e-deps e2e build run \
 	postgres-start postgres-stop image-build image-run image-stop image-push \
 	ci ci-run release version

@@ -15,3 +15,6 @@ go = "1.26.4"
 "aqua:nektos/act" = "0.2.89"
 "aqua:goreleaser/goreleaser" = "2.16.0"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.1.4"
+# Dapr CLI for the e2e target (dapr init + dapr run). The runtime version it
+# installs is pinned separately via DAPR_RUNTIME_VERSION in .env.example/Makefile.
+"aqua:dapr/cli" = "1.18.0"
