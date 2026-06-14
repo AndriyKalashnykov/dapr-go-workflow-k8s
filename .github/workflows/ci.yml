@@ -45,6 +45,9 @@ jobs:
           fetch-depth: 0   # gitleaks scans git history
       - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4
         with:
+          # Pinned: mise resolves "latest" to a tag whose release assets may not
+          # be published yet (v2026.6.7 was tagged with no linux-x64 asset → 404).
+          version: "2026.6.5"
           install: true
           cache: true
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -64,6 +67,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4
         with:
+          # Pinned: mise resolves "latest" to a tag whose release assets may not
+          # be published yet (v2026.6.7 was tagged with no linux-x64 asset → 404).
+          version: "2026.6.5"
           install: true
           cache: true
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -83,6 +89,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4
         with:
+          # Pinned: mise resolves "latest" to a tag whose release assets may not
+          # be published yet (v2026.6.7 was tagged with no linux-x64 asset → 404).
+          version: "2026.6.5"
           install: true
           cache: true
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
