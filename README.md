@@ -122,6 +122,6 @@ All operator-tunable values are documented in [`.env.example`](.env.example). Co
 | `release.yml` | `v*.*.*` tags | reuses `ci.yml`, then GoReleaser publishes binaries + GitHub Release |
 | `cleanup-runs.yml` | weekly / dispatch | prunes old workflow runs and caches |
 
-The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts PostgreSQL, runs the app under a Dapr sidecar, schedules `PostgresSQLDatabasesPut`, and asserts the recipe output. The `docker` job builds the image, runs a blocking Trivy scan, and validates the multi-arch build on every push; on a tag it publishes a cosign-signed multi-arch image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
+The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts PostgreSQL, runs the app under a Dapr sidecar, schedules `PostgresSQLDatabasesPut`, and asserts the recipe output. The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
 
 > **Dapr runtime ≥ 1.18 is required.** go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes (`required metadata dapr-callee-app-id ... not found`). `make e2e` installs the version pinned by `DAPR_RUNTIME_VERSION` (default 1.18.0).
