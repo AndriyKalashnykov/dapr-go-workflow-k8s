@@ -154,10 +154,14 @@ e2e-deps: deps
 	@# install left the daprd binary (init refuses), self-heal with uninstall+reinit.
 	@if ! docker ps --format '{{.Names}}' | grep -qE '^dapr_scheduler$$'; then \
 		echo "Initializing Dapr runtime $(DAPR_RUNTIME_VERSION)..."; \
-		dapr init --runtime-version $(DAPR_RUNTIME_VERSION) || { \
-			dapr uninstall --all >/dev/null 2>&1; \
-			dapr init --runtime-version $(DAPR_RUNTIME_VERSION); \
-		}; \
+		ok=""; \
+		for a in 1 2 3; do \
+			if dapr init --runtime-version $(DAPR_RUNTIME_VERSION); then ok=1; break; fi; \
+			echo "dapr init attempt $$a failed (often a transient Docker Hub pull timeout) — cleaning up and retrying..."; \
+			dapr uninstall --all >/dev/null 2>&1 || true; \
+			sleep $$((a * 10)); \
+		done; \
+		[ -n "$$ok" ] || { echo "ERROR: dapr init failed after 3 attempts"; exit 1; }; \
 	fi
 
 #e2e: @ End-to-end test: run the workflow through a real Dapr sidecar
