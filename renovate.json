@@ -12,7 +12,7 @@
       "description": "Track Makefile tool versions via inline # renovate: comments",
       "managerFilePatterns": ["/^Makefile$/"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: extractVersion=(?<extractVersion>[^\\s]+))?(?: registryUrl=(?<registryUrl>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\n[A-Z0-9_]+\\s*[?:]?=\\s*(?<currentValue>[^\\s]+)"
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: extractVersion=(?<extractVersion>[^\\s]+))?(?: registryUrl=(?<registryUrl>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\n[A-Z0-9_]+\\s*[?:]?=\\s*(?<currentValue>[\\w][\\w.+-]*)"
       ]
     }
   ],
@@ -66,6 +66,12 @@
       "matchManagers": ["gomod"],
       "matchPackageNames": ["/^github\\.com\\/dapr\\//"],
       "groupName": "Dapr Go SDK"
+    },
+    {
+      "description": "Disable digest pinning for Makefile-tracked docker dev tools (e.g. minlag/mermaid-cli). config:best-practices' docker:pinDigests otherwise generates a pinDigest update that collides with the version bump on the same branch and silently drops it. These are dev/lint tools invoked via `docker run image:$(VERSION)`, not production runtime — version pinning is sufficient. Production pins (Dockerfile FROM) keep their digests. Scoped by file + datasource (the Makefile is the only docker pin outside the Dockerfile).",
+      "matchFileNames": ["Makefile"],
+      "matchDatasources": ["docker"],
+      "pinDigests": false
     }
   ]
 }
