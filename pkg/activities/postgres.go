@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	daprworkflow "github.com/dapr/go-sdk/workflow"
+	"github.com/dapr/durabletask-go/workflow"
 	"github.com/google/uuid"
 )
 
-func CallCreatePostgresUser(ctx *daprworkflow.WorkflowContext, input CreatePostgresUserInput) (CreatePostgresUserOutput, error) {
-	task := ctx.CallActivity(CreatePostgresUser, daprworkflow.ActivityInput(input))
+func CallCreatePostgresUser(ctx *workflow.WorkflowContext, input CreatePostgresUserInput) (CreatePostgresUserOutput, error) {
+	task := ctx.CallActivity(CreatePostgresUser, workflow.WithActivityInput(input))
 
 	output := CreatePostgresUserOutput{}
 	err := task.Await(&output)
@@ -29,7 +29,7 @@ type CreatePostgresUserOutput struct {
 	Password string `json:"password"`
 }
 
-func CreatePostgresUser(ctx daprworkflow.ActivityContext) (any, error) {
+func CreatePostgresUser(ctx workflow.ActivityContext) (any, error) {
 	input := CreatePostgresUserInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {
@@ -50,8 +50,8 @@ func CreatePostgresUser(ctx daprworkflow.ActivityContext) (any, error) {
 	}, nil
 }
 
-func CallDeletePostgresUser(ctx *daprworkflow.WorkflowContext, input DeletePostgresUserInput) (DeletePostgresUserOutput, error) {
-	task := ctx.CallActivity(DeletePostgresUser, daprworkflow.ActivityInput(input))
+func CallDeletePostgresUser(ctx *workflow.WorkflowContext, input DeletePostgresUserInput) (DeletePostgresUserOutput, error) {
+	task := ctx.CallActivity(DeletePostgresUser, workflow.WithActivityInput(input))
 
 	output := DeletePostgresUserOutput{}
 	err := task.Await(&output)
@@ -69,7 +69,7 @@ type DeletePostgresUserInput struct {
 type DeletePostgresUserOutput struct {
 }
 
-func DeletePostgresUser(ctx daprworkflow.ActivityContext) (any, error) {
+func DeletePostgresUser(ctx workflow.ActivityContext) (any, error) {
 	input := DeletePostgresUserInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {
@@ -82,8 +82,8 @@ func DeletePostgresUser(ctx daprworkflow.ActivityContext) (any, error) {
 	return DeletePostgresUserOutput{}, nil
 }
 
-func CallCreatePostgresDatabase(ctx *daprworkflow.WorkflowContext, input CreatePostgresDatabaseInput) (CreatePostgresDatabaseOutput, error) {
-	task := ctx.CallActivity(CreatePostgresDatabase, daprworkflow.ActivityInput(input))
+func CallCreatePostgresDatabase(ctx *workflow.WorkflowContext, input CreatePostgresDatabaseInput) (CreatePostgresDatabaseOutput, error) {
+	task := ctx.CallActivity(CreatePostgresDatabase, workflow.WithActivityInput(input))
 
 	output := CreatePostgresDatabaseOutput{}
 	err := task.Await(&output)
@@ -104,7 +104,7 @@ type CreatePostgresDatabaseOutput struct {
 	Database string `json:"database"`
 }
 
-func CreatePostgresDatabase(ctx daprworkflow.ActivityContext) (any, error) {
+func CreatePostgresDatabase(ctx workflow.ActivityContext) (any, error) {
 	input := CreatePostgresDatabaseInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {
@@ -123,8 +123,8 @@ func CreatePostgresDatabase(ctx daprworkflow.ActivityContext) (any, error) {
 	}, nil
 }
 
-func CallDeletePostgresDatabase(ctx *daprworkflow.WorkflowContext, input DeletePostgresDatabaseInput) (DeletePostgresDatabaseOutput, error) {
-	task := ctx.CallActivity(DeletePostgresDatabase, daprworkflow.ActivityInput(input))
+func CallDeletePostgresDatabase(ctx *workflow.WorkflowContext, input DeletePostgresDatabaseInput) (DeletePostgresDatabaseOutput, error) {
+	task := ctx.CallActivity(DeletePostgresDatabase, workflow.WithActivityInput(input))
 
 	output := DeletePostgresDatabaseOutput{}
 	err := task.Await(&output)
@@ -143,7 +143,7 @@ type DeletePostgresDatabaseInput struct {
 type DeletePostgresDatabaseOutput struct {
 }
 
-func DeletePostgresDatabase(ctx daprworkflow.ActivityContext) (any, error) {
+func DeletePostgresDatabase(ctx workflow.ActivityContext) (any, error) {
 	input := DeletePostgresDatabaseInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {

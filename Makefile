@@ -1,98 +1,197 @@
 .DEFAULT_GOAL := help
-CURRENTTAG:=$(shell git describe --tags --abbrev=0)
-NEWTAG ?= $(shell bash -c 'read -p "Please provide a new tag (currnet tag - ${CURRENTTAG}): " newtag; echo $$newtag')
-GOFLAGS=-mod=mod
+SHELL := /bin/bash
 
-IS_DARWIN := 0
-IS_LINUX := 0
-IS_FREEBSD := 0
-IS_WINDOWS := 0
-IS_AMD64 := 0
-IS_AARCH64 := 0
-IS_RISCV64 := 0
+APP_NAME       := dapr-go-workflow-k8s
+CURRENTTAG     := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+GOFLAGS        ?= -mod=mod
 
-# Test Windows apart because it doesn't support `uname -s`.
-ifeq ($(OS), Windows_NT)
-	# We can assume it will likely be in amd64.
-	IS_AMD64 := 1
-	IS_WINDOWS := 1
-else
-	# Platform
-	uname := $(shell uname -s)
+# Go version is the single source of truth in go.mod; .mise.toml and the
+# Dockerfile mirror it (enforced by `make check-go-alignment`).
+GO_VERSION     := $(shell grep -oP '^go \K[0-9]+\.[0-9]+\.[0-9]+' go.mod)
 
-	ifeq ($(uname), Darwin)
-		IS_DARWIN := 1
-	else ifeq ($(uname), Linux)
-		IS_LINUX := 1
-	else ifeq ($(uname), FreeBSD)
-		IS_FREEBSD := 1
-	else
-		# We use spaces instead of tabs to indent `$(error)`
-		# otherwise it's considered as a command outside a
-		# target and it will fail.
-                $(error Unrecognized platform, expect `Darwin`, `Linux` or `Windows_NT`)
-	endif
+# Coverage gate (percentage). The unit-testable surface (recipes, activities,
+# server, healthcheck) is well covered; the workflow-orchestration funcs and
+# their `Call*` activity wrappers require a live Dapr sidecar (validated by
+# start-workflow.sh against a running sidecar, not by unit tests), so the total
+# floor is set accordingly. Tunable via env or `make COVERAGE_THRESHOLD=85`.
+COVERAGE_THRESHOLD ?= 40
 
-	# Architecture
-	uname := $(shell uname -m)
+# Container image — `:=` (not `?=`) so an exported DOCKER_REGISTRY/REGISTRY_OWNER
+# in the shell can't silently redirect a publish to the wrong registry. A
+# command-line `make IMAGE_REGISTRY=...` still overrides.
+IMAGE_REGISTRY := ghcr.io
+REGISTRY_OWNER := andriykalashnykov
+IMAGE_NAME     := $(IMAGE_REGISTRY)/$(REGISTRY_OWNER)/$(APP_NAME)
+IMAGE_TAG      ?= $(CURRENTTAG)
 
-	ifneq (, $(filter $(uname), x86_64 amd64))
-		IS_AMD64 := 1
-	else ifneq (, $(filter $(uname), aarch64 arm64))
-		IS_AARCH64 := 1
-	else ifneq (, $(filter $(uname), riscv64))
-		IS_RISCV64 := 1
-	else
-		# We use spaces instead of tabs to indent `$(error)`
-		# otherwise it's considered as a command outside a
-		# target and it will fail.
-                $(error Unrecognized architecture, expect `x86_64`, `aarch64`, `arm64`, 'riscv64')
-	endif
-endif
+# mise installs tools under its shims dir; Make recipes don't source shell rc
+# files, so put the shims dir (and ~/.local/bin) on PATH for every recipe.
+export PATH := $(HOME)/.local/share/mise/shims:$(HOME)/.local/bin:$(PATH)
 
 #help: @ List available tasks
 help:
-	@clear
 	@echo "Usage: make COMMAND"
 	@echo "Commands :"
-	@grep -E '[a-zA-Z\.\-]+:.*?@ .*$$' $(MAKEFILE_LIST)| tr -d '#' | awk 'BEGIN {FS = ":.*?@ "}; {printf "\033[32m%-15s\033[0m - %s\n", $$1, $$2}'
+	@grep -E '[a-zA-Z\.\-]+:.*?@ .*$$' $(MAKEFILE_LIST) | tr -d '#' | awk 'BEGIN {FS = ":.*?@ "}; {printf "\033[32m%-22s\033[0m - %s\n", $$1, $$2}'
 
-#clean: @ Cleanup
+#deps: @ Install toolchain (Go + quality tools) via mise
+deps:
+	@if [ -z "$$CI" ] && ! command -v mise >/dev/null 2>&1; then \
+		echo "Installing mise (no root; installs to ~/.local/bin)..."; \
+		curl -fsSL https://mise.run | sh; \
+		echo "mise installed — activate it, then re-run 'make deps':"; \
+		echo '  echo '\''eval "$$(~/.local/bin/mise activate bash)"'\'' >> ~/.bashrc'; \
+		exit 0; \
+	fi
+	@mise install --yes
+	@export GOFLAGS=$(GOFLAGS); go mod download
+
+#deps-check: @ Show Go version and mise-managed tool status
+deps-check:
+	@echo "Go version (go.mod): $(GO_VERSION)"
+	@command -v mise >/dev/null 2>&1 && mise list || echo "mise not installed — run 'make deps'"
+
+#check-go-alignment: @ Verify the Go version matches across go.mod, .mise.toml, Dockerfile
+check-go-alignment:
+	@set -e; \
+	gomod=$$(grep -oP '^go \K[0-9]+\.[0-9]+\.[0-9]+' go.mod); \
+	misefile=$$(grep -oP '^go\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' .mise.toml); \
+	dockerfile=$$(grep -oP 'FROM golang:\K[0-9]+\.[0-9]+\.[0-9]+' Dockerfile); \
+	if [ "$$gomod" != "$$misefile" ] || [ "$$gomod" != "$$dockerfile" ]; then \
+		echo "ERROR: Go version disagrees across files:"; \
+		printf "  %-12s %s\n" go.mod "$$gomod" .mise.toml "$$misefile" Dockerfile "$$dockerfile"; \
+		exit 1; \
+	fi
+
+#clean: @ Remove build artifacts
 clean:
-	@rm ./cmd/main
+	@rm -f ./cmd/main coverage.out
 
-#test: @ Run tests
-test:
-	@export GOFLAGS=$(GOFLAGS); go test ./...
-
-#build: @ Build binary
-build:
-	@export GOFLAGS=$(GOFLAGS); export CGO_ENABLED=0; GOOS=linux GOARCH=amd64 go build -o ./cmd/main ./cmd/main.go
-
-#run: @ Run binary
-run:
-	@./run-dapr.sh
-
-#get: @ Download and install dependency packages
-get:
-	@export GOFLAGS=$(GOFLAGS); go get ./... ; go mod tidy
+#get: @ Download and tidy dependencies
+get: deps
+	@export GOFLAGS=$(GOFLAGS); go get ./... && go mod tidy
 
 #update: @ Update dependencies to latest versions
-update:
-	@export GOFLAGS=$(GOFLAGS); go get -u ./... ; go mod tidy
+update: deps
+	@export GOFLAGS=$(GOFLAGS); go get -u ./... && go mod tidy
 
-#release: @ Create and push a new tag
-release: build
-	$(eval NT=$(NEWTAG))
-	@echo -n "Are you sure to create and push ${NT} tag? [y/N] " && read ans && [ $${ans:-N} = y ]
-	@echo ${NT} > ./version.txt
-	@git add -A
-	@git commit -a -s -m "Cut ${NT} release"
-	@git tag -a -m "Cut ${NT} release" ${NT}
-	@git push origin ${NT}
-	@git push
-	@echo "Done."
+#format: @ Auto-format Go source (gofmt + goimports via golangci-lint)
+format: deps
+	@golangci-lint fmt ./...
 
-#version: @ Print current version(tag)
+#lint: @ Run golangci-lint, go mod tidy check, and hadolint
+lint: deps
+	@golangci-lint run ./...
+	@export GOFLAGS=$(GOFLAGS); go mod tidy && git diff --exit-code go.mod go.sum || { echo "ERROR: go.mod/go.sum not tidy. Run 'go mod tidy'."; exit 1; }
+	@hadolint Dockerfile
+
+#lint-ci: @ Lint GitHub Actions workflows (actionlint + shellcheck)
+lint-ci: deps
+	@actionlint
+	@shellcheck run-dapr.sh run-postgres.sh start-workflow.sh db/init-db.sh
+
+#vulncheck: @ Check for known vulnerabilities in dependencies
+vulncheck: deps
+	@govulncheck ./...
+
+#secrets: @ Scan for hardcoded secrets
+secrets: deps
+	@gitleaks detect --source . --no-banner --redact
+
+#trivy-fs: @ Scan filesystem for vulnerabilities, secrets, and misconfigurations
+trivy-fs: deps
+	@trivy fs --scanners vuln,secret,misconfig --severity CRITICAL,HIGH --exit-code 1 .
+
+#static-check: @ Composite quality gate (alignment + workflow lint + lint + vuln + secrets + trivy)
+static-check: check-go-alignment lint-ci lint vulncheck secrets trivy-fs
+	@echo "Static check passed."
+
+#test: @ Run unit tests with race detector and coverage
+test: deps
+	@export GOFLAGS=$(GOFLAGS); go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+#coverage-check: @ Verify coverage meets COVERAGE_THRESHOLD (default 70%)
+coverage-check: deps
+	@if [ ! -s coverage.out ]; then echo "ERROR: coverage.out missing or empty. Run 'make test' first."; exit 1; fi
+	@total=$$(go tool cover -func=coverage.out | grep '^total:' | grep -oE '[0-9]+\.[0-9]+'); \
+	echo "Total coverage: $$total% (threshold: $(COVERAGE_THRESHOLD)%)"; \
+	awk -v t="$$total" -v g="$(COVERAGE_THRESHOLD)" 'BEGIN { exit (t+0 >= g+0) ? 0 : 1 }' || { echo "ERROR: coverage below threshold"; exit 1; }
+
+#build: @ Build linux/amd64 binary to ./cmd/main
+build: deps
+	@export GOFLAGS=$(GOFLAGS); CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ./cmd/main ./cmd/main.go
+
+#run: @ Run the app via the Dapr sidecar
+run: deps
+	@./run-dapr.sh
+
+#postgres-start: @ Start a local PostgreSQL container (state store)
+postgres-start:
+	@./run-postgres.sh
+
+#postgres-stop: @ Stop the local PostgreSQL container
+postgres-stop:
+	@docker rm -f sample-postgres 2>/dev/null || true
+
+#image-build: @ Build the container image
+image-build:
+	@docker buildx build --load -t $(IMAGE_NAME):$(IMAGE_TAG) -t $(IMAGE_NAME):latest .
+
+#image-run: @ Run the container image locally (needs a Dapr sidecar to be healthy)
+image-run: image-stop
+	@docker run --rm -p 7999:7999 --name $(APP_NAME) $(IMAGE_NAME):$(IMAGE_TAG)
+
+#image-stop: @ Stop the local container
+image-stop:
+	@docker stop $(APP_NAME) 2>/dev/null || true
+
+#image-push: @ Push the container image to the registry
+image-push: image-build
+	@if [ -n "$$GH_ACCESS_TOKEN" ] && echo "$(IMAGE_REGISTRY)" | grep -q "ghcr.io"; then \
+		echo "$$GH_ACCESS_TOKEN" | docker login ghcr.io -u "$(REGISTRY_OWNER)" --password-stdin; \
+	fi
+	@docker push $(IMAGE_NAME):$(IMAGE_TAG)
+	@docker push $(IMAGE_NAME):latest
+
+#ci: @ Full local CI pipeline (mirrors GitHub Actions)
+ci: deps format static-check test coverage-check build
+	@echo "Local CI pipeline passed."
+
+#ci-run: @ Run the GitHub Actions workflow locally via act
+ci-run: deps
+	@docker container prune -f 2>/dev/null || true
+	@evt=$$(mktemp /tmp/act-push-event.XXXXXX.json); \
+	 printf '{"ref":"refs/heads/main","repository":{"default_branch":"main","name":"$(APP_NAME)","full_name":"$(REGISTRY_OWNER)/$(APP_NAME)"}}' > "$$evt"; \
+	 ACT_PORT=$$(shuf -i 40000-59999 -n 1); \
+	 ARTIFACT_PATH=$$(mktemp -d -t act-artifacts.XXXXXX); \
+	 rc=0; \
+	 for j in static-check build test; do \
+		echo "==== act push --job $$j ===="; \
+		act push --job $$j --container-architecture linux/amd64 --pull=false \
+			--eventpath "$$evt" \
+			--artifact-server-port "$$ACT_PORT" \
+			--artifact-server-path "$$ARTIFACT_PATH" || { rc=1; break; }; \
+	 done; \
+	 rm -f "$$evt"; exit $$rc
+
+#release: @ Create and push a new release tag (vN.N.N)
+release:
+	@bash -c 'read -p "New tag (current: $(CURRENTTAG)): " newtag && \
+		echo "$$newtag" | grep -qE "^v[0-9]+\.[0-9]+\.[0-9]+$$" || { echo "Error: Tag must match vN.N.N"; exit 1; } && \
+		echo -n "Create and push $$newtag? [y/N] " && read ans && [ "$${ans:-N}" = y ] && \
+		echo $$newtag > ./version.txt && \
+		git add -A && \
+		git commit -a -s -m "Cut $$newtag release" && \
+		git tag -a -m "Cut $$newtag release" $$newtag && \
+		git push origin $$newtag && \
+		git push && \
+		echo "Done."'
+
+#version: @ Print the current version (git tag)
 version:
-	@echo $(shell git describe --tags --abbrev=0)
+	@echo $(CURRENTTAG)
+
+.PHONY: help deps deps-check check-go-alignment clean get update format lint lint-ci \
+	vulncheck secrets trivy-fs static-check test coverage-check build run \
+	postgres-start postgres-stop image-build image-run image-stop image-push \
+	ci ci-run release version

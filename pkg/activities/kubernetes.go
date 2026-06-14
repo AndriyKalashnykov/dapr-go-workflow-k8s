@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"time"
 
-	daprworkflow "github.com/dapr/go-sdk/workflow"
+	"github.com/dapr/durabletask-go/workflow"
 )
 
-func CallDeployKubernetesResources(ctx *daprworkflow.WorkflowContext, input DeployKubernetesResourcesInput) (DeployKubernetesResourcesOutput, error) {
-	task := ctx.CallActivity(DeployKubernetesResources, daprworkflow.ActivityInput(input))
+func CallDeployKubernetesResources(ctx *workflow.WorkflowContext, input DeployKubernetesResourcesInput) (DeployKubernetesResourcesOutput, error) {
+	task := ctx.CallActivity(DeployKubernetesResources, workflow.WithActivityInput(input))
 
 	output := DeployKubernetesResourcesOutput{}
 	err := task.Await(&output)
@@ -31,7 +31,7 @@ type DeployKubernetesResourcesOutput struct {
 	Port      int      `json:"port"`
 }
 
-func DeployKubernetesResources(ctx daprworkflow.ActivityContext) (any, error) {
+func DeployKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	input := DeployKubernetesResourcesInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {
@@ -56,8 +56,8 @@ func DeployKubernetesResources(ctx daprworkflow.ActivityContext) (any, error) {
 	}, nil
 }
 
-func CallDeleteKubernetesResources(ctx *daprworkflow.WorkflowContext, input DeleteKubernetesResourcesInput) (DeleteKubernetesResourcesOutput, error) {
-	task := ctx.CallActivity(DeleteKubernetesResources, daprworkflow.ActivityInput(input))
+func CallDeleteKubernetesResources(ctx *workflow.WorkflowContext, input DeleteKubernetesResourcesInput) (DeleteKubernetesResourcesOutput, error) {
+	task := ctx.CallActivity(DeleteKubernetesResources, workflow.WithActivityInput(input))
 
 	output := DeleteKubernetesResourcesOutput{}
 	err := task.Await(&output)
@@ -76,7 +76,7 @@ type DeleteKubernetesResourcesInput struct {
 type DeleteKubernetesResourcesOutput struct {
 }
 
-func DeleteKubernetesResources(ctx daprworkflow.ActivityContext) (any, error) {
+func DeleteKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	input := DeleteKubernetesResourcesInput{}
 	err := ctx.GetInput(&input)
 	if err != nil {

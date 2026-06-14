@@ -1,0 +1,8 @@
+# hadolint configuration.
+# DL3008/DL3059 are not relevant: the runtime is distroless (no apt) and the
+# builder stage only runs `go` commands.
+ignored:
+  - DL3008  # pin apt versions — N/A, no apt in any stage
+trustedRegistries:
+  - gcr.io
+  - docker.io

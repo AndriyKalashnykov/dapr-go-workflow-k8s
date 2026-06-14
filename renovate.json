@@ -2,91 +2,60 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:best-practices",
-    ":approveMajorUpdates",
-    ":label(dependencies)",
-    ":semanticCommitType(chore)",
-    ":automergePatch",
-    ":automergePr",
-    ":automergeRequireAllStatusChecks",
-    ":prConcurrentLimitNone",
-    ":separatePatchReleases"
+    ":semanticCommitType(chore)"
   ],
-  "postUpdateOptions": [
-    "gomodTidy"
-  ],
+  "enabledManagers": ["gomod", "github-actions", "dockerfile", "mise"],
+  "postUpdateOptions": ["gomodTidy"],
   "commitMessagePrefix": "chore(all): ",
   "commitMessageAction": "update",
   "commitBody": "Signed-off-by: Renovate Bot <bot@renovateapp.com>",
-  "platformAutomerge": true,
+  "labels": ["dependencies"],
   "prConcurrentLimit": 50,
   "prHourlyLimit": 0,
-  "groupName": "all",
-  "labels": [
-    "dependencies"
-  ],
+  "platformAutomerge": false,
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "ignoreTests": false,
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true,
+    "minimumReleaseAge": "0 days"
+  },
   "packageRules": [
     {
-      "description": "Automerge major updates",
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Automerge non-major updates",
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin",
-        "pinDigest",
-        "internal",
-        "devDependencies",
-        "ref",
-        "none",
-        "security",
-        "grop",
-        "unpin"
-      ],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
-      "description": "Automerge github-actions updates",
-      "matchManagers": [
-        "github-actions"
-      ],
-      "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": true
-    },
-    {
       "description": "Wait 3 days before automerging major updates",
-      "matchUpdateTypes": [
-        "major"
-      ],
+      "matchUpdateTypes": ["major"],
       "minimumReleaseAge": "3 days"
     },
     {
       "description": "Group GitHub Actions into one PR",
-      "matchManagers": [
-        "github-actions"
-      ],
+      "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Group mise tool bumps and hold each for 3 days so the upstream GitHub Release artifacts the aqua/github-tags backend installs are published before the PR opens (prevents the tag-before-publish 404).",
+      "matchManagers": ["mise"],
+      "groupName": "mise tools",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Bump the go directive in go.mod to the latest patch",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Go toolchain is mirrored across go.mod, .mise.toml, and the Dockerfile builder — bump them together so a split PR can't leave them misaligned (also guarded by `make check-go-alignment`).",
+      "matchManagers": ["gomod", "mise", "dockerfile"],
+      "matchDepNames": ["go", "golang"],
+      "groupName": "Go toolchain"
+    },
+    {
+      "description": "Group the Dapr Go SDK and durabletask-go — they are version-locked (the workflow authoring API lives in durabletask-go and is consumed via go-sdk).",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["/^github\\.com\\/dapr\\//"],
+      "groupName": "Dapr Go SDK"
     }
-  ],
-  "automergeType": "branch",
-  "automerge": true,
-  "ignoreTests": false,
-  "automergeStrategy": "squash",
-  "vulnerabilityAlerts": {
-    "labels": [
-      "security"
-    ],
-    "automerge": true,
-    "minimumReleaseAge": "0 days"
-  }
+  ]
 }

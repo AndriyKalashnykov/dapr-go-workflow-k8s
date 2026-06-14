@@ -7,33 +7,35 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/dapr/durabletask-go/workflow"
+	daprclient "github.com/dapr/go-sdk/client"
+
 	"github.com/AndriyKalashnykov/dapr-go-workflow-k8s/pkg/activities"
 	"github.com/AndriyKalashnykov/dapr-go-workflow-k8s/pkg/server"
 	"github.com/AndriyKalashnykov/dapr-go-workflow-k8s/pkg/workflows"
-	daprclient "github.com/dapr/go-sdk/client"
-	daprworkflow "github.com/dapr/go-sdk/workflow"
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("Error starting services", slog.Any("error", err))
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx := context.Background()
 
 	services := map[string]context.CancelFunc{}
 	ctx, cancel := registerShutdown(ctx, services)
 	defer cancel()
-	go func() {
 
-	}()
-
-	err := start(ctx, services)
-	if err != nil {
-		slog.ErrorContext(ctx, "Error starting services", slog.Any("error", err))
-		os.Exit(1)
-		return // unreachable
+	if err := start(ctx, services); err != nil {
+		return err
 	}
 
 	slog.InfoContext(ctx, "Server started: Press CTRL+C to stop")
 	<-ctx.Done()
-	cancel()
+	return nil
 }
 
 func registerShutdown(ctx context.Context, services map[string]context.CancelFunc) (context.Context, context.CancelFunc) {
@@ -52,73 +54,55 @@ func start(ctx context.Context, services map[string]context.CancelFunc) error {
 
 	dapr, err := daprclient.NewClient()
 	if err != nil {
-		return fmt.Errorf("error creating Dapr client: %v", err)
+		return fmt.Errorf("error creating Dapr client: %w", err)
 	}
 	services["daprclient"] = dapr.Close
 
-	err = registerWorkflows(ctx, dapr)
-	if err != nil {
-		return fmt.Errorf("error initializing workflows: %v", err)
+	// The Dapr workflow authoring/management API lives in durabletask-go and
+	// talks to the Dapr sidecar over the client's shared gRPC connection.
+	wfClient := workflow.NewClient(dapr.GrpcClientConn())
+
+	if err := registerWorkflows(ctx, wfClient); err != nil {
+		return fmt.Errorf("error initializing workflows: %w", err)
 	}
 
-	err = server.Start(ctx, services, dapr)
-	if err != nil {
-		return fmt.Errorf("error starting HTTP server: %v", err)
+	if err := server.Start(ctx, services, wfClient); err != nil {
+		return fmt.Errorf("error starting HTTP server: %w", err)
 	}
 
 	return nil
 }
 
-func registerWorkflows(ctx context.Context, dapr daprclient.Client) error {
-	worker, err := daprworkflow.NewWorker(daprworkflow.WorkerWithDaprClient(dapr))
-	if err != nil {
-		return fmt.Errorf("error creating Dapr workflow worker: %w", err)
+func registerWorkflows(ctx context.Context, wfClient *workflow.Client) error {
+	r := workflow.NewRegistry()
+
+	if err := r.AddWorkflow(workflows.PostgresSQLDatabasesPut); err != nil {
+		return fmt.Errorf("error registering workflow PostgresSQLDatabasesPut: %w", err)
+	}
+	if err := r.AddWorkflow(workflows.PostgresSQLDatabasesDelete); err != nil {
+		return fmt.Errorf("error registering workflow PostgresSQLDatabasesDelete: %w", err)
 	}
 
-	// TODO: register workflows and activities.
-
-	err = worker.RegisterWorkflow(workflows.PostgresSQLDatabasesPut)
-	if err != nil {
-		return fmt.Errorf("error registering workflow: %w", err)
+	if err := r.AddActivity(activities.DeployKubernetesResources); err != nil {
+		return fmt.Errorf("error registering activity DeployKubernetesResources: %w", err)
+	}
+	if err := r.AddActivity(activities.DeleteKubernetesResources); err != nil {
+		return fmt.Errorf("error registering activity DeleteKubernetesResources: %w", err)
+	}
+	if err := r.AddActivity(activities.CreatePostgresUser); err != nil {
+		return fmt.Errorf("error registering activity CreatePostgresUser: %w", err)
+	}
+	if err := r.AddActivity(activities.DeletePostgresUser); err != nil {
+		return fmt.Errorf("error registering activity DeletePostgresUser: %w", err)
+	}
+	if err := r.AddActivity(activities.CreatePostgresDatabase); err != nil {
+		return fmt.Errorf("error registering activity CreatePostgresDatabase: %w", err)
+	}
+	if err := r.AddActivity(activities.DeletePostgresDatabase); err != nil {
+		return fmt.Errorf("error registering activity DeletePostgresDatabase: %w", err)
 	}
 
-	err = worker.RegisterWorkflow(workflows.PostgresSQLDatabasesDelete)
-	if err != nil {
-		return fmt.Errorf("error registering workflow: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.DeployKubernetesResources)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.DeleteKubernetesResources)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.CreatePostgresUser)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.DeletePostgresUser)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.CreatePostgresDatabase)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.RegisterActivity(activities.DeletePostgresDatabase)
-	if err != nil {
-		return fmt.Errorf("error registering activity: %w", err)
-	}
-
-	err = worker.Start()
-	if err != nil {
+	if err := wfClient.StartWorker(ctx, r); err != nil {
 		return fmt.Errorf("error starting Dapr workflow worker: %w", err)
 	}
 

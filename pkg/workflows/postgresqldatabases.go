@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/dapr/durabletask-go/workflow"
+
 	"github.com/AndriyKalashnykov/dapr-go-workflow-k8s/pkg/activities"
 	"github.com/AndriyKalashnykov/dapr-go-workflow-k8s/pkg/recipes"
-	daprworkflow "github.com/dapr/go-sdk/workflow"
 )
 
-func PostgresSQLDatabasesPut(ctx *daprworkflow.WorkflowContext) (any, error) {
+func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 	request := recipes.Context{}
 	err := ctx.GetInput(&request)
 	if err != nil {
@@ -64,7 +65,7 @@ func PostgresSQLDatabasesPut(ctx *daprworkflow.WorkflowContext) (any, error) {
 	return result, nil
 }
 
-func PostgresSQLDatabasesDelete(ctx *daprworkflow.WorkflowContext) (any, error) {
+func PostgresSQLDatabasesDelete(ctx *workflow.WorkflowContext) (any, error) {
 	request := recipes.Context{}
 	err := ctx.GetInput(&request)
 	if err != nil {
@@ -79,7 +80,7 @@ func PostgresSQLDatabasesDelete(ctx *daprworkflow.WorkflowContext) (any, error) 
 	}
 
 	database, ok := request.Resource.GetStringValue("/status/binding/database")
-	if !ok {
+	if ok {
 		_, err = activities.CallDeletePostgresDatabase(ctx, activities.DeletePostgresDatabaseInput{
 			Database:     database,
 			CreateBackup: true,
@@ -90,7 +91,7 @@ func PostgresSQLDatabasesDelete(ctx *daprworkflow.WorkflowContext) (any, error) 
 	}
 
 	username, ok := request.Resource.GetStringValue("/status/binding/username")
-	if !ok {
+	if ok {
 		_, err = activities.CallDeletePostgresUser(ctx, activities.DeletePostgresUserInput{
 			Username: username,
 		})
