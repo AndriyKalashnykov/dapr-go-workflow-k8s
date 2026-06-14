@@ -31,7 +31,7 @@ Request/response flow: client `PUT /workflows` → server schedules it on the wo
 
 ## Build, Run & Test
 
-Toolchain and quality tools are managed by **mise** (`.mise.toml`); `make deps` bootstraps them. The composite gate is `make static-check` (alignment + workflow/shell lint + golangci-lint + govulncheck + gitleaks + trivy-fs). `make ci` runs the full local pipeline.
+Toolchain and quality tools are managed by **mise** (`.mise.toml`); `make deps` bootstraps them. The composite gate is `make static-check` (Go-version alignment + workflow/shell lint via actionlint/shellcheck + golangci-lint + govulncheck + gitleaks + trivy-fs + `mermaid-lint` via `minlag/mermaid-cli`). `make ci` runs the full local pipeline.
 
 ```bash
 make ci          # deps + format + static-check + test + coverage-check + build
@@ -71,6 +71,6 @@ Use the following skills when working on related files:
 | `Makefile` | `/makefile` |
 | `renovate.json` | `/renovate` |
 | `README.md` | `/readme` |
-| `.github/workflows/*.yml` | `/ci-workflow` |
+| `.github/workflows/*.{yml,yaml}` | `/ci-workflow` |
 
 When spawning subagents, always pass conventions from the respective skill into the agent's prompt.
