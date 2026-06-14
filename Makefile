@@ -139,7 +139,7 @@ static-check: check-go-alignment lint-ci lint vulncheck secrets trivy-fs mermaid
 test: deps
 	@export GOFLAGS=$(GOFLAGS); go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-#coverage-check: @ Verify coverage meets COVERAGE_THRESHOLD (default 70%)
+#coverage-check: @ Verify coverage meets COVERAGE_THRESHOLD (default 40%)
 coverage-check: deps
 	@if [ ! -s coverage.out ]; then echo "ERROR: coverage.out missing or empty. Run 'make test' first."; exit 1; fi
 	@total=$$(go tool cover -func=coverage.out | grep '^total:' | grep -oE '[0-9]+\.[0-9]+'); \
