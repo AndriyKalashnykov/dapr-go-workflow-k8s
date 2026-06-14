@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+dist/
+cmd/main
+*.md
+*.out
+.env
+.mise.toml
+.golangci.yml
+Makefile
+run-*.sh
+start-workflow.sh

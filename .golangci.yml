@@ -1,0 +1,39 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/AndriyKalashnykov/dapr-go-workflow-k8s
+
+linters:
+  default: standard
+  enable:
+    - bodyclose     # detect unclosed HTTP response bodies
+    - errorlint     # enforce errors.Is/As over == comparison
+    - goconst       # repeated strings/numbers that should be constants
+    - gocritic      # comprehensive style/performance/diagnostic checks
+    - gosec         # SAST security scanner
+    - misspell      # catch misspellings in comments and strings
+    - noctx         # detect HTTP requests without context
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gosec:
+      excludes:
+        - G104  # unhandled errors — already covered by errcheck
+  exclusions:
+    rules:
+      # Test setup legitimately uses simple net.Listen / client.Get without a
+      # context (port reservation, one-shot probes); don't force ctx plumbing there.
+      - path: _test\.go
+        linters:
+          - noctx

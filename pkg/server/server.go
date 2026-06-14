@@ -5,46 +5,94 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dapr/durabletask-go/api"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"time"
 
-	daprclient "github.com/dapr/go-sdk/client"
-	daprworkflow "github.com/dapr/go-sdk/workflow"
+	"github.com/dapr/durabletask-go/workflow"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-const (
-	Address = ":7999"
-)
+// DefaultPort is the HTTP listen port used when APP_PORT is not set. It must
+// match the `--app-port` passed to the Dapr sidecar (see run-dapr.sh) and the
+// APP_INTERNAL_PORT build arg in the Dockerfile.
+const DefaultPort = "7999"
 
-func Start(ctx context.Context, services map[string]context.CancelFunc, dapr daprclient.Client) error {
-	workflowClient, err := daprworkflow.NewClient(daprworkflow.WithDaprClient(dapr))
-	if err != nil {
-		return fmt.Errorf("error creating Dapr workflow client: %v", err)
+// Address returns the TCP listen address, honoring the APP_PORT env var.
+func Address() string {
+	port := os.Getenv("APP_PORT")
+	if port == "" {
+		port = DefaultPort
+	}
+	return ":" + port
+}
+
+func Start(ctx context.Context, services map[string]context.CancelFunc, wfClient *workflow.Client) error {
+	mux := newMux(ctx, wfClient)
+
+	addr := Address()
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+		// Mitigate Slowloris — bound how long a client may take to send headers.
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(l net.Listener) context.Context {
+			return ctx
+		},
 	}
 
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("error creating listener: %w", err)
+	}
+
+	slog.InfoContext(ctx, "Server is listening", slog.String("address", listener.Addr().String()))
+
+	go func() {
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			slog.InfoContext(ctx, "server shutdown gracefully")
+		} else {
+			slog.ErrorContext(ctx, "server error", slog.Any("error", err))
+		}
+	}()
+
+	services["http"] = func() {
+		if err := server.Shutdown(ctx); err != nil {
+			slog.ErrorContext(ctx, "server shutdown error", slog.Any("error", err))
+		}
+	}
+
+	return nil
+}
+
+// newMux builds the HTTP routes. Extracted from Start so handlers can be
+// exercised with httptest without binding a TCP port.
+func newMux(ctx context.Context, wfClient *workflow.Client) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		mustWriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	mux.HandleFunc("GET /workflows/{id}", func(w http.ResponseWriter, r *http.Request) {
-		slog.InfoContext(ctx, "Fetching workflow metadata", slog.String("id", r.PathValue("id")))
-
 		id := r.PathValue("id")
-		metadata, err := workflowClient.FetchWorkflowMetadata(r.Context(), id, daprworkflow.WithFetchPayloads(true))
+		slog.InfoContext(ctx, "Fetching workflow metadata", slog.String("id", id))
+
+		metadata, err := wfClient.FetchWorkflowMetadata(r.Context(), id, workflow.WithFetchPayloads(true))
 		if err != nil {
 			mustWriteError(w, http.StatusInternalServerError, "Internal", err)
 			return
 		}
 
-		mustWriteJSON(w, http.StatusOK, metadata)
+		mustWriteJSON(w, http.StatusOK, newWorkflowStatus(metadata))
 	})
 
 	mux.HandleFunc("PUT /workflows", func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		request := WorkflowRequest{}
 		err := decoder.Decode(&request)
@@ -58,60 +106,33 @@ func Start(ctx context.Context, services map[string]context.CancelFunc, dapr dap
 			return
 		}
 
-		slog.InfoContext(ctx, "Starting new workflow", slog.String("id", r.PathValue("id")), slog.String("name", request.Name))
+		slog.InfoContext(ctx, "Starting new workflow", slog.String("name", request.Name))
 
-		opts := []api.NewOrchestrationOptions{}
-		opts = append(opts, daprworkflow.WithRawInput(string(request.Input)))
+		opts := []workflow.NewWorkflowOptions{
+			workflow.WithRawInput(wrapperspb.String(string(request.Input))),
+		}
 		if request.ID != "" {
-			opts = append(opts, daprworkflow.WithInstanceID(request.ID))
+			opts = append(opts, workflow.WithInstanceID(request.ID))
 		}
 
-		result, err := workflowClient.ScheduleNewWorkflow(r.Context(), request.Name, opts...)
+		id, err := wfClient.ScheduleWorkflow(r.Context(), request.Name, opts...)
 		if err != nil {
 			mustWriteError(w, http.StatusInternalServerError, "Internal", err)
 			return
 		}
 
-		slog.InfoContext(ctx, "Workflow started", slog.String("id", result), slog.String("name", request.Name))
-		mustWriteJSON(w, http.StatusCreated, map[string]any{"id": result})
+		slog.InfoContext(ctx, "Workflow started", slog.String("id", id), slog.String("name", request.Name))
+		mustWriteJSON(w, http.StatusCreated, map[string]any{"id": id})
 	})
 
-	server := &http.Server{
-		Addr:    Address,
-		Handler: mux,
-		BaseContext: func(l net.Listener) context.Context {
-			return ctx
-		},
-	}
-
-	listener, err := net.Listen("tcp", Address)
-	if err != nil {
-		return fmt.Errorf("error creating listener: %v", err)
-	}
-
-	slog.InfoContext(ctx, "Server is listening", slog.String("address", listener.Addr().String()))
-
-	go func() {
-		err := server.Serve(listener)
-		if errors.Is(http.ErrServerClosed, err) {
-			slog.InfoContext(ctx, "server shutdown gracefully")
-		} else {
-			slog.ErrorContext(ctx, "server error", slog.Any("error", err))
-		}
-	}()
-
-	services["http"] = func() {
-		err := server.Shutdown(ctx)
-		slog.ErrorContext(ctx, "server shutdown error", slog.Any("error", err))
-	}
-
-	return nil
+	return mux
 }
 
 func mustWriteJSON(w http.ResponseWriter, code int, v any) {
 	bs, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		mustWriteError(w, http.StatusInternalServerError, "Internal", err)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

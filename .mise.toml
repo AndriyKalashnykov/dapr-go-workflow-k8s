@@ -1,0 +1,17 @@
+[tools]
+# Go toolchain — must match the `go` directive in go.mod and the builder
+# stage in Dockerfile (enforced by `make check-go-alignment`).
+go = "1.26.4"
+
+# Quality/security tooling. Renovate's native `mise` manager tracks every
+# entry below (aqua → github-tags, go: → Go module proxy) — no `# renovate:`
+# comments or custom manager required.
+"aqua:golangci/golangci-lint" = "2.12.2"
+"aqua:gitleaks/gitleaks" = "8.30.1"
+"aqua:aquasecurity/trivy" = "0.71.0"
+"aqua:hadolint/hadolint" = "2.14.0"
+"aqua:rhysd/actionlint" = "1.7.12"
+"aqua:koalaman/shellcheck" = "0.11.0"
+"aqua:nektos/act" = "0.2.89"
+"aqua:goreleaser/goreleaser" = "2.16.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.1.4"

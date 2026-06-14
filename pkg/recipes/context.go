@@ -55,7 +55,9 @@ func (r *Resource) GetStringValue(key string) (string, bool) {
 		return "", false
 	}
 
-	return value.(string), true
+	// Comma-ok assertion: a non-string value at the pointer must not panic.
+	s, ok := value.(string)
+	return s, ok
 }
 
 // ResourceInfo represents name and id of the resource
