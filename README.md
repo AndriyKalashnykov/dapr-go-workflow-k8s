@@ -12,10 +12,10 @@ Reference Go service that drives **[Radius](https://radapp.io/) Recipes** throug
 
 | Component | Technology |
 |-----------|------------|
-| Language | Go 1.26 |
+| Language | Go 1.26.4 |
 | Workflow engine | [Dapr durable workflows](https://docs.dapr.io/developing-applications/building-blocks/workflow/) via `dapr/durabletask-go` v0.12 |
 | Dapr SDK | `dapr/go-sdk` v1.15 (runtime ≥ 1.18) |
-| HTTP | `net/http` + [go-chi/chi](https://github.com/go-chi/chi) router |
+| HTTP | Go stdlib `net/http` (`http.ServeMux`, method + path routing) |
 | Recipe contract | Radius Recipe `Context` / `Result` types (`pkg/recipes`) |
 | PostgreSQL backend | [`jackc/pgx`](https://github.com/jackc/pgx) v5 (real role/database provisioning) |
 | Kubernetes backend | [`k8s.io/client-go`](https://github.com/kubernetes/client-go) (deploys the PostgreSQL Deployment + Service + Secret) |
@@ -50,9 +50,11 @@ make e2e
 | [Git](https://git-scm.com/) | latest | Source control | per-platform |
 | [mise](https://mise.jdx.dev) | latest | Manages the Go toolchain and all quality/security tools | `curl https://mise.run \| sh` (or `make deps`) |
 | [Docker](https://docs.docker.com/get-docker/) | latest | Local PostgreSQL + container image builds | per-platform |
-| [Dapr CLI](https://docs.dapr.io/getting-started/install-dapr-cli/) | latest | Running the app with a sidecar | `dapr init` |
+| [Dapr CLI](https://docs.dapr.io/getting-started/install-dapr-cli/) | `.mise.toml`-pinned | Runs the app with a sidecar; `dapr init` bootstraps the runtime | `make deps` (mise) |
+| [kind](https://kind.sigs.k8s.io/) | `.mise.toml`-pinned | Local Kubernetes cluster for `make e2e` | `make deps` (mise) |
+| [kubectl](https://kubernetes.io/docs/reference/kubectl/) | `.mise.toml`-pinned | Talks to the cluster the recipe deploys into | `make deps` (mise) |
 
-`make deps` bootstraps mise and installs the Go toolchain plus `golangci-lint`, `gitleaks`, `trivy`, `hadolint`, `actionlint`, `shellcheck`, `act`, `goreleaser`, and `govulncheck` — all pinned in `.mise.toml`.
+`make deps` bootstraps mise and installs the Go toolchain plus `dapr` (CLI), `kind`, `kubectl`, `golangci-lint`, `gitleaks`, `trivy`, `hadolint`, `actionlint`, `shellcheck`, `act`, `goreleaser`, and `govulncheck` — all pinned in `.mise.toml`.
 
 ## Architecture
 
@@ -114,7 +116,7 @@ All operator-tunable values are documented in [`.env.example`](.env.example). Co
 | `APP_PORT` | `7999` | HTTP listen port (must match the Dapr sidecar `--app-port`) |
 | `DAPR_APP_ID` | `sample` | Dapr application id |
 | `DAPR_GRPC_PORT` | `50001` | Dapr sidecar gRPC port |
-| `POSTGRES_PASSWORD` | `daprrulz` | Local dev PostgreSQL password |
+| `POSTGRES_PASSWORD` | see [`.env.example`](.env.example) | Local dev PostgreSQL superuser password (single source of truth in `.env.example`) |
 | `POSTGRES_PORT` | `5432` | Local dev PostgreSQL port |
 | `POSTGRES_WORKLOAD_IMAGE` | `postgres:18-alpine` | Image the recipe deploys as the database workload (Renovate-tracked) |
 | `KUBECONFIG` | `~/.kube/config` | Cluster the recipe deploys the PostgreSQL workload into (`make e2e` uses its own kind cluster) |
@@ -136,13 +138,14 @@ Run `make help` to see all targets.
 | `make build` | Build the linux/amd64 binary to `./cmd/main` |
 | `make run` | Run the app via the Dapr sidecar |
 | `make check-ports` | Fail early if a guarded host port (Postgres/app/gRPC) is already in use |
+| `make check-env` | STOPPER — fail if the committed `.env.example` source-of-truth is missing |
 | `make clean` | Remove build artifacts |
 
 ### Testing
 
 | Target | Description |
 |--------|-------------|
-| `make test` | Unit tests with race detector + coverage (seconds; `-short` skips the 5s backup sim) |
+| `make test` | Unit tests with race detector + coverage (seconds; hermetic — fakes + client-go fake clientset) |
 | `make coverage-check` | Verify coverage meets `COVERAGE_THRESHOLD` (default 40%) |
 | `make e2e-deps` | Ensure the Dapr control plane (placement + scheduler) is up |
 | `make e2e` | End-to-end: real Dapr sidecar + a kind cluster; deploys a PostgreSQL workload, verifies the role/DB on it + idempotent re-Put, then destroys the workload (minutes; needs Docker + Dapr CLI) |
@@ -159,7 +162,7 @@ Run `make help` to see all targets.
 | `make secrets` | gitleaks secret scan |
 | `make trivy-fs` | Trivy filesystem scan (vuln, secret, misconfig) |
 | `make mermaid-lint` | Validate Mermaid diagrams in markdown (same engine GitHub renders with) |
-| `make static-check` | Composite quality gate (alignment + workflow lint + lint + vuln + secrets + trivy + mermaid) |
+| `make static-check` | Composite quality gate (env + alignment + workflow lint + lint + vuln + secrets + trivy + mermaid) |
 
 ### Local Infra & Containers
 
@@ -178,6 +181,7 @@ Run `make help` to see all targets.
 |--------|-------------|
 | `make ci` | Full local CI pipeline (mirrors GitHub Actions) |
 | `make ci-run` | Run the GitHub Actions workflow locally via [act](https://github.com/nektos/act) |
+| `make renovate-validate` | Validate `renovate.json` against the Renovate config schema |
 | `make release` | Create and push a new release tag (`vN.N.N`) |
 | `make version` | Print the current version (git tag) |
 
@@ -192,3 +196,11 @@ Run `make help` to see all targets.
 The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts the state-store PostgreSQL, creates a kind cluster, runs the app under a Dapr sidecar, and asserts the recipe **actually deployed a PostgreSQL workload** (ready Deployment) and provisioned a role + database on it (the credentials authenticate over the Service's NodePort) — then re-Puts idempotently and `PostgresSQLDatabasesDelete` destroys the workload (kind + kubectl come from mise). The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
 
 > **Dapr runtime ≥ 1.18 is required.** go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes (`required metadata dapr-callee-app-id ... not found`). `make e2e` installs the version pinned by `DAPR_RUNTIME_VERSION` (default 1.18.0).
+
+## Contributing
+
+Contributions welcome — open a PR. Run `make ci` locally before pushing; CI gates every change on the `ci-pass` check.
+
+## License
+
+[MIT](LICENSE).

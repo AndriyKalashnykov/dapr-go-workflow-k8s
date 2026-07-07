@@ -12,6 +12,7 @@ concurrency:
 permissions:
   contents: read
   actions: write
+  pull-requests: read   # gh pr list, to exclude open-PR runs from deletion
 
 jobs:
   cleanup-runs:
@@ -25,17 +26,27 @@ jobs:
       - name: Delete old workflow runs
         run: |
           CUTOFF=$(date -u -d "${RETAIN_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+          # SHAs backing OPEN PRs — never delete their runs, or an idle PR older
+          # than RETAIN_DAYS loses its CI run and becomes silently un-mergeable
+          # (mergeStateStatus=BLOCKED, 0 checks reported).
+          OPEN_SHAS=$(gh pr list --repo "${{ github.repository }}" --state open \
+            --json headRefOid --jq '[.[].headRefOid]')
           # Retain the newest KEEP_MINIMUM runs PER WORKFLOW (group_by
-          # .workflowName), THEN delete any remaining run older than CUTOFF. A
-          # single GLOBAL minimum can purge every run of a low-frequency
-          # workflow and flip it to state=deleted (deregisters it).
+          # .workflowName), THEN delete any remaining run older than CUTOFF whose
+          # head SHA does not back an open PR. A single GLOBAL minimum can purge
+          # every run of a low-frequency workflow and flip it to state=deleted
+          # (deregisters it).
           gh run list --repo "${{ github.repository }}" \
-            --json databaseId,createdAt,workflowName --limit 300 \
-          | jq -r --arg cutoff "$CUTOFF" --argjson keep "$KEEP_MINIMUM" '
+            --json databaseId,createdAt,workflowName,headSha --limit 300 \
+          | jq -r --arg cutoff "$CUTOFF" --argjson keep "$KEEP_MINIMUM" \
+                --argjson open "$OPEN_SHAS" '
               group_by(.workflowName)
               | map(sort_by(.createdAt) | reverse | .[$keep:])
               | add // []
-              | .[] | select(.createdAt < $cutoff) | .databaseId
+              | .[]
+              | select(.createdAt < $cutoff)
+              | select(.headSha as $s | ($open | index($s)) | not)
+              | .databaseId
             ' \
           | xargs -r -I{} gh run delete {} --repo "${{ github.repository }}"
 

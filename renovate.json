@@ -1,5 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "platformAutomerge is intentionally false (not the base-template true): main requires the `ci-pass` status check, and GitHub-native platform automerge can fire in the brief window before that check registers. PR-level automerge (automerge:true, automergeType:pr) waits for the check, so it is the race-safe choice here. Do not flip platformAutomerge to true."
+  ],
   "extends": [
     "config:best-practices",
     ":semanticCommitType(chore)"
@@ -88,8 +91,8 @@
       "groupName": "Dapr runtime"
     },
     {
-      "description": "Disable digest pinning for Makefile-tracked docker dev tools (e.g. minlag/mermaid-cli). config:best-practices' docker:pinDigests otherwise generates a pinDigest update that collides with the version bump on the same branch and silently drops it. These are dev/lint tools invoked via `docker run image:$(VERSION)`, not production runtime — version pinning is sufficient. Production pins (Dockerfile FROM) keep their digests. Scoped by file + datasource (the Makefile is the only docker pin outside the Dockerfile).",
-      "matchFileNames": ["Makefile"],
+      "description": "Disable digest pinning for every custom.regex-tracked docker ref: the Makefile's minlag/mermaid-cli dev tool AND the postgres workload image tracked in pkg/activities/config.go + .env.example. config:best-practices' docker:pinDigests generates a pinDigest update these customManagers cannot write back (their matchStrings capture only the tag, no currentDigest group), so the renovate/pin-dependencies branch errors on every run. Version pinning is sufficient here; the Dockerfile FROM pins (built-in dockerfile manager) keep their digests.",
+      "matchManagers": ["custom.regex"],
       "matchDatasources": ["docker"],
       "pinDigests": false
     }
