@@ -68,6 +68,17 @@
       "groupName": "Dapr Go SDK"
     },
     {
+      "description": "Group the Kubernetes client libraries — k8s.io/api, /apimachinery, and /client-go (used by the real Kubernetes activity) are released in lockstep and must bump together.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["/^k8s\\.io\\//"],
+      "groupName": "Kubernetes client"
+    },
+    {
+      "description": "Group the Dapr CLI (aqua:dapr/cli in .mise.toml — resolved packageName dapr/cli) and the Dapr runtime (DAPR_RUNTIME_VERSION in the Makefile, dapr/dapr) — the CLI installs the matching control-plane runtime for `make e2e`, so they should bump together. Matched by packageName because the mise manager's depName carries the aqua: prefix.",
+      "matchPackageNames": ["dapr/cli", "dapr/dapr"],
+      "groupName": "Dapr runtime"
+    },
+    {
       "description": "Disable digest pinning for Makefile-tracked docker dev tools (e.g. minlag/mermaid-cli). config:best-practices' docker:pinDigests otherwise generates a pinDigest update that collides with the version bump on the same branch and silently drops it. These are dev/lint tools invoked via `docker run image:$(VERSION)`, not production runtime — version pinning is sufficient. Production pins (Dockerfile FROM) keep their digests. Scoped by file + datasource (the Makefile is the only docker pin outside the Dockerfile).",
       "matchFileNames": ["Makefile"],
       "matchDatasources": ["docker"],

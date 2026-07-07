@@ -6,9 +6,9 @@
 [![Renovate enabled](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://app.renovatebot.com/dashboard#github/AndriyKalashnykov/dapr-go-workflow-k8s)
 [![Go Reference](https://pkg.go.dev/badge/github.com/AndriyKalashnykov/dapr-go-workflow-k8s.svg)](https://pkg.go.dev/github.com/AndriyKalashnykov/dapr-go-workflow-k8s)
 
-Reference Go service that drives **[Radius](https://radapp.io/) Recipes** through **[Dapr](https://dapr.io/) durable workflows**. The **runtime surface** is a small REST API that schedules durable workflows (`durabletask-go` registry + `dapr/go-sdk`) to provision or tear down a PostgreSQL database and its backing Kubernetes resources, returning recipe outputs (`values`, `secrets`, `resources`) in the shape Radius expects; the **delivery surface** ships a distroless image, a real Dapr-sidecar end-to-end test (`make e2e`), a `mise`-pinned toolchain, a `static-check` gate (golangci-lint, govulncheck, gitleaks, Trivy, hadolint, actionlint/shellcheck, mermaid-lint), and a GitHub Actions pipeline with a blocking Trivy scan and cosign keyless image signing, with Renovate-managed dependencies.
+Reference Go service that drives **[Radius](https://radapp.io/) Recipes** through **[Dapr](https://dapr.io/) durable workflows**. The **runtime surface** is a small REST API that schedules durable workflows (`durabletask-go` registry + `dapr/go-sdk`) which provision or tear down a **real** PostgreSQL database (via [`pgx`](https://github.com/jackc/pgx)) and a Kubernetes Service + Secret binding (via [`client-go`](https://github.com/kubernetes/client-go)), returning recipe outputs (`values`, `secrets`, `resources`) in the shape Radius expects; the **delivery surface** ships a distroless image, a real Dapr-sidecar + kind end-to-end test (`make e2e`) that verifies provisioning against a live Postgres and cluster, a `mise`-pinned toolchain, a `static-check` gate (golangci-lint, govulncheck, gitleaks, Trivy, hadolint, actionlint/shellcheck, mermaid-lint), and a GitHub Actions pipeline with a blocking Trivy scan and cosign keyless image signing, with Renovate-managed dependencies.
 
-> **Note:** the workflow activities are demo stubs — they log and simulate work rather than calling real Kubernetes / PostgreSQL APIs. Treat this repository as a Radius-recipe-on-Dapr-workflows scaffold; wiring the activities to real backends is the intended extension point.
+> **The activities call real backends.** The workflow runs real PostgreSQL DDL (`CREATE ROLE`/`CREATE DATABASE`/`DROP …`) via **pgx** and publishes a real Kubernetes **Service + Secret** binding via **client-go** — the returned recipe URI is genuinely connectable, and `make e2e` verifies the provisioning (and teardown) against a real Postgres and a real kind cluster. The remaining extension point is swapping the Kubernetes binding for a full workload deploy and wiring the Azure/AWS provider scopes.
 
 | Component | Technology |
 |-----------|------------|
@@ -17,6 +17,8 @@ Reference Go service that drives **[Radius](https://radapp.io/) Recipes** throug
 | Dapr SDK | `dapr/go-sdk` v1.15 (runtime ≥ 1.18) |
 | HTTP | `net/http` + [go-chi/chi](https://github.com/go-chi/chi) router |
 | Recipe contract | Radius Recipe `Context` / `Result` types (`pkg/recipes`) |
+| PostgreSQL backend | [`jackc/pgx`](https://github.com/jackc/pgx) v5 (real role/database provisioning) |
+| Kubernetes backend | [`k8s.io/client-go`](https://github.com/kubernetes/client-go) (real Service + Secret binding) |
 | State store | PostgreSQL (Dapr `state.postgresql` component) |
 | Container | `gcr.io/distroless/static-debian12:nonroot` (multi-stage build) |
 | CI / security | GitHub Actions, Trivy, gitleaks, govulncheck, cosign keyless signing |
@@ -28,11 +30,15 @@ Reference Go service that drives **[Radius](https://radapp.io/) Recipes** throug
 make deps             # install toolchain + quality tools (via mise)
 make ci               # full local pipeline: format + static-check + test + coverage + build
 
-# Run the workflow end to end (needs Docker + the Dapr CLI):
-make postgres-start   # start a local PostgreSQL state store
-make run              # run the app under a Dapr sidecar
+# Run the workflow end to end (needs Docker, the Dapr CLI, and a reachable
+# kubeconfig — the recipe publishes a real Service + Secret into the cluster):
+make postgres-start   # start a local PostgreSQL state store (the admin endpoint)
+make run              # run the app under a Dapr sidecar (uses KUBECONFIG / ~/.kube/config)
 ./start-workflow.sh   # health-check, PUT a workflow, poll until it completes
 make postgres-stop    # tear down PostgreSQL
+
+# Or the fully-automated version (spins up its own kind cluster):
+make e2e
 ```
 
 ## Prerequisites
@@ -66,16 +72,20 @@ flowchart LR
     http["HTTP server :7999<br/>PUT/GET /workflows"]
     worker["Workflow worker<br/>(durabletask-go registry)"]
     wf["Workflows<br/>PostgreSQLDatabases Put/Delete"]
-    act["Activities (stubs)<br/>K8s + Postgres CRUD"]
+    act["Activities<br/>pgx + client-go"]
   end
   daprd["Dapr sidecar (daprd)"]
   ctrl["Placement + Scheduler"]
   pg[("PostgreSQL<br/>state store")]
+  pgadmin[("PostgreSQL<br/>role + database")]
+  k8s["Kubernetes API<br/>Service + Secret"]
   client -->|"PUT /workflows"| http
   http -->|"schedule / fetch"| daprd
   daprd --> worker
   worker --> wf
   wf -->|"CallActivity"| act
+  act -->|"pgx DDL"| pgadmin
+  act -->|"client-go"| k8s
   daprd <--> ctrl
   daprd -->|"workflow / actor state"| pg
 ```
@@ -85,7 +95,7 @@ cmd/
   main.go          - Application entrypoint (worker + HTTP server)
   healthcheck/     - Dependency-free container HEALTHCHECK probe
 pkg/
-  activities/      - Dapr workflow activities (K8s deploy/delete, Postgres user/db CRUD) — demo stubs
+  activities/      - Dapr workflow activities: real Postgres DDL (pgx) + K8s Service/Secret binding (client-go)
   recipes/         - Radius Recipe contract types (Context / Result)
   server/          - HTTP server, routes, and the workflow-status DTO
   workflows/       - Durable workflow definitions (PostgreSQL databases put/delete)
@@ -95,7 +105,7 @@ db/               - PostgreSQL initialization script
 
 ## Configuration
 
-All operator-tunable values are documented in [`.env.example`](.env.example). Copy it to `.env` to override locally; `run-dapr.sh` and `run-postgres.sh` source both. Key variables:
+All operator-tunable values are documented in [`.env.example`](.env.example). Copy it to `.env` to override locally; the shell scripts source both, and the `Makefile` reads `.env` too (`-include .env`). Key variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -104,6 +114,10 @@ All operator-tunable values are documented in [`.env.example`](.env.example). Co
 | `DAPR_GRPC_PORT` | `50001` | Dapr sidecar gRPC port |
 | `POSTGRES_PASSWORD` | `daprrulz` | Local dev PostgreSQL password |
 | `POSTGRES_PORT` | `5432` | Local dev PostgreSQL port |
+| `PG_ADMIN_*` | ← `POSTGRES_*` | Admin PostgreSQL endpoint the recipe provisions against (host/port/user/password); falls back to the `POSTGRES_*` dev container |
+| `KUBECONFIG` | `~/.kube/config` | Cluster the recipe publishes the Service + Secret binding into (`make e2e` uses its own kind cluster) |
+
+Fixed host ports are guarded before every bind by `make check-ports` (a prerequisite of `e2e`/`run`/`postgres-start`); on a collision it fails early naming the holder, and you override the matching `*_PORT` (e.g. in `.env`).
 
 ## Make Targets
 
@@ -119,6 +133,7 @@ Run `make help` to see all targets.
 | `make update` | Update dependencies to latest versions |
 | `make build` | Build the linux/amd64 binary to `./cmd/main` |
 | `make run` | Run the app via the Dapr sidecar |
+| `make check-ports` | Fail early if a guarded host port (Postgres/app/gRPC) is already in use |
 | `make clean` | Remove build artifacts |
 
 ### Testing
@@ -128,7 +143,7 @@ Run `make help` to see all targets.
 | `make test` | Unit tests with race detector + coverage (seconds; `-short` skips the 5s backup sim) |
 | `make coverage-check` | Verify coverage meets `COVERAGE_THRESHOLD` (default 40%) |
 | `make e2e-deps` | Ensure the Dapr control plane (placement + scheduler) is up |
-| `make e2e` | End-to-end: run the workflow through a real Dapr sidecar (minutes; needs Docker + Dapr CLI) |
+| `make e2e` | End-to-end: real Dapr sidecar + real Postgres + a kind cluster; provisions a database, verifies the role/DB/URI + K8s Service/Secret, then tears it all down (minutes; needs Docker + Dapr CLI) |
 
 ### Code Quality
 
@@ -172,6 +187,6 @@ Run `make help` to see all targets.
 | `release.yml` | `v*.*.*` tags | reuses `ci.yml`, then GoReleaser publishes binaries + GitHub Release |
 | `cleanup-runs.yml` | weekly / dispatch | prunes old workflow runs and caches |
 
-The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts PostgreSQL, runs the app under a Dapr sidecar, schedules `PostgresSQLDatabasesPut`, and asserts the recipe output. The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
+The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts PostgreSQL, creates a kind cluster, runs the app under a Dapr sidecar, and asserts the recipe **actually provisioned** a real Postgres role + database (the returned URI authenticates) and a real Kubernetes Service + Secret — then that `PostgresSQLDatabasesDelete` tears them all down (kind + kubectl come from mise). The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
 
 > **Dapr runtime ≥ 1.18 is required.** go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes (`required metadata dapr-callee-app-id ... not found`). `make e2e` installs the version pinned by `DAPR_RUNTIME_VERSION` (default 1.18.0).

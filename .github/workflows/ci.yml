@@ -22,10 +22,14 @@ jobs:
     timeout-minutes: 2
     outputs:
       # Tag pushes bypass the path filter so the docker publish job always runs.
-      code: ${{ startsWith(github.ref, 'refs/tags/') && 'true' || steps.filter.outputs.code }}
+      # Under act (local `make ci-run`) ACT=true: the filter step is skipped
+      # (act's local checkout has no git history for change detection), so default
+      # code=true and let the downstream jobs run. Real CI (ACT unset) is unaffected.
+      code: ${{ (startsWith(github.ref, 'refs/tags/') || env.ACT == 'true') && 'true' || steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        if: ${{ !env.ACT }}
         id: filter
         with:
           base: ${{ github.event_name == 'push' && 'main' || '' }}
@@ -105,15 +109,19 @@ jobs:
         run: make coverage-check
 
   e2e:
-    # Runs the workflow through a real Dapr sidecar: `make e2e` does
-    # `dapr init` (Docker control plane), starts PostgreSQL, runs the app, and
-    # schedules PostgresSQLDatabasesPut, asserting the recipe output. Not run
-    # under act (Docker-in-Docker `dapr init` is unreliable there); `make ci-run`
-    # exercises only static-check/build/test.
+    # Runs the workflow through a real Dapr sidecar against REAL backends:
+    # `make e2e` does `dapr init` (Docker control plane), starts PostgreSQL, and
+    # e2e/e2e-test.sh creates a kind cluster, runs the app, schedules
+    # PostgresSQLDatabasesPut and asserts the recipe actually provisioned a real
+    # Postgres role+database (the returned URI authenticates) and a real
+    # Kubernetes Service+Secret, then PostgresSQLDatabasesDelete tears both down.
+    # kind + kubectl come from mise. Not run under act (Docker-in-Docker
+    # `dapr init`/kind is unreliable there); `make ci-run` exercises only
+    # static-check/build/test.
     needs: [changes, build, test]
     if: ${{ needs.changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4

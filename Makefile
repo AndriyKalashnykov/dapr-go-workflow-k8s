@@ -3,6 +3,12 @@ SHELL := /bin/bash
 
 APP_NAME       := dapr-go-workflow-k8s
 CURRENTTAG     := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+# Load operator overrides from .env (gitignored) BEFORE the `?=` defaults below,
+# so `.env` is authoritative for `make` too — not just compose/shell scripts.
+# `-include` silently skips a missing .env, in which case the `?=` defaults apply.
+-include .env
+
 GOFLAGS        ?= -mod=mod
 
 # Go version is the single source of truth in go.mod; .mise.toml and the
@@ -17,10 +23,20 @@ GO_VERSION     := $(shell grep -oP '^go \K[0-9]+\.[0-9]+\.[0-9]+' go.mod)
 COVERAGE_THRESHOLD ?= 40
 
 # Dapr runtime version installed by `make e2e-deps` (see .env.example).
+# renovate: datasource=github-releases depName=dapr/dapr extractVersion=^v(?<version>.*)$
 DAPR_RUNTIME_VERSION ?= 1.18.0
 
-# App HTTP port (mirrors .env.example APP_PORT). `?=` lets the env / CLI override.
-APP_PORT ?= 7999
+# Host ports (mirror .env.example). `?=` lets the env / .env / CLI override.
+# Used by `check-ports` to fail early on a collision before a bind.
+APP_PORT       ?= 7999
+DAPR_GRPC_PORT ?= 50001
+POSTGRES_PORT  ?= 5432
+
+# Ports guarded before a bind. `check-ports` probes this set (override to a
+# subset per run-flow). Containers this project manages idempotently are not
+# treated as collisions.
+CHECK_PORTS      ?= $(POSTGRES_PORT) $(APP_PORT) $(DAPR_GRPC_PORT)
+OWNED_CONTAINERS ?= sample-postgres
 
 # renovate: datasource=docker depName=minlag/mermaid-cli
 MERMAID_CLI_VERSION := 11.15.0
@@ -164,8 +180,28 @@ e2e-deps: deps
 		[ -n "$$ok" ] || { echo "ERROR: dapr init failed after 3 attempts"; exit 1; }; \
 	fi
 
+#check-ports: @ Fail early if a guarded host port is held by a foreign process
+check-ports:
+	@rc=0; owned="$(OWNED_CONTAINERS)"; \
+	for p in $(CHECK_PORTS); do \
+		if (exec 3<>/dev/tcp/127.0.0.1/$$p) 2>/dev/null; then \
+			exec 3>&- 3<&-; \
+			holder=$$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | awk -v p=":$$p->" 'index($$0,p){print $$1; exit}'); \
+			skip=""; for o in $$owned; do [ "$$holder" = "$$o" ] && skip=1; done; \
+			if [ -n "$$skip" ]; then \
+				echo "  port $$p held by managed container '$$holder' (will be replaced)"; \
+			else \
+				echo "ERROR: port $$p is already in use$${holder:+ by container '$$holder'}."; \
+				echo "  Free it, or override the matching *_PORT (see .env.example)."; \
+				rc=1; \
+			fi; \
+		fi; \
+	done; \
+	[ $$rc -eq 0 ] || exit 1; \
+	echo "Ports available: $(CHECK_PORTS)"
+
 #e2e: @ End-to-end test: run the workflow through a real Dapr sidecar
-e2e: build e2e-deps postgres-start
+e2e: check-ports build e2e-deps postgres-start
 	@bash e2e/e2e-test.sh; rc=$$?; $(MAKE) --no-print-directory postgres-stop; exit $$rc
 
 #build: @ Build linux/amd64 binary to ./cmd/main
@@ -174,10 +210,12 @@ build: deps
 
 #run: @ Run the app via the Dapr sidecar
 run: deps
+	@$(MAKE) --no-print-directory check-ports CHECK_PORTS="$(APP_PORT) $(DAPR_GRPC_PORT)"
 	@./run-dapr.sh
 
 #postgres-start: @ Start a local PostgreSQL container (state store)
 postgres-start:
+	@$(MAKE) --no-print-directory check-ports CHECK_PORTS="$(POSTGRES_PORT)"
 	@./run-postgres.sh
 
 #postgres-stop: @ Stop the local PostgreSQL container
@@ -245,6 +283,6 @@ version:
 	@echo $(CURRENTTAG)
 
 .PHONY: help deps deps-check check-go-alignment clean get update format lint lint-ci \
-	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check e2e-deps e2e build run \
+	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check check-ports e2e-deps e2e build run \
 	postgres-start postgres-stop image-build image-run image-stop image-push \
 	ci ci-run release version

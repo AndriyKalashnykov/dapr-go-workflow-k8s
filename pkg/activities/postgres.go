@@ -1,13 +1,18 @@
 package activities
 
 import (
-	"fmt"
 	"log/slog"
-	"time"
+	"strings"
 
 	"github.com/dapr/durabletask-go/workflow"
 	"github.com/google/uuid"
 )
+
+// shortID returns 8 hex characters suitable for a unique, DNS/identifier-safe
+// suffix on generated role and database names.
+func shortID() string {
+	return strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+}
 
 func CallCreatePostgresUser(ctx *workflow.WorkflowContext, input CreatePostgresUserInput) (CreatePostgresUserOutput, error) {
 	task := ctx.CallActivity(CreatePostgresUser, workflow.WithActivityInput(input))
@@ -29,20 +34,29 @@ type CreatePostgresUserOutput struct {
 	Password string `json:"password"`
 }
 
+// CreatePostgresUser provisions a unique LOGIN role on the admin PostgreSQL
+// endpoint with a freshly generated password.
 func CreatePostgresUser(ctx workflow.ActivityContext) (any, error) {
 	input := CreatePostgresUserInput{}
-	err := ctx.GetInput(&input)
-	if err != nil {
+	if err := ctx.GetInput(&input); err != nil {
 		return nil, err
 	}
 
-	// Pretend we are very secure...
-	username := "pguser"
+	username := "pguser_" + shortID()
 	password := uuid.NewString()
 
 	logger := slog.Default()
-	logger.Info("Generating new postgres user", slog.String("username", "pguser"))
-	logger.Info("Generating really really secure password", slog.String("password", "********")) // Haha, just kidding
+	logger.Info("Creating postgres role", slog.String("username", username))
+
+	admin, err := newPGAdmin(ctx.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = admin.Close(ctx.Context()) }()
+
+	if err := admin.CreateRole(ctx.Context(), username, password); err != nil {
+		return nil, err
+	}
 
 	return CreatePostgresUserOutput{
 		Username: username,
@@ -69,15 +83,25 @@ type DeletePostgresUserInput struct {
 type DeletePostgresUserOutput struct {
 }
 
+// DeletePostgresUser drops the role from the admin PostgreSQL endpoint.
 func DeletePostgresUser(ctx workflow.ActivityContext) (any, error) {
 	input := DeletePostgresUserInput{}
-	err := ctx.GetInput(&input)
-	if err != nil {
+	if err := ctx.GetInput(&input); err != nil {
 		return nil, err
 	}
 
 	logger := slog.Default()
-	logger.Info("Deleting postgres user", slog.String("username", input.Username))
+	logger.Info("Deleting postgres role", slog.String("username", input.Username))
+
+	admin, err := newPGAdmin(ctx.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = admin.Close(ctx.Context()) }()
+
+	if err := admin.DropRole(ctx.Context(), input.Username); err != nil {
+		return nil, err
+	}
 
 	return DeletePostgresUserOutput{}, nil
 }
@@ -102,24 +126,40 @@ type CreatePostgresDatabaseInput struct {
 
 type CreatePostgresDatabaseOutput struct {
 	Database string `json:"database"`
+	// Host and Port locate the server the database was created on — the same
+	// reachable admin endpoint — so the recipe's advertised URI is connectable.
+	Host string `json:"host"`
+	Port string `json:"port"`
 }
 
+// CreatePostgresDatabase creates a uniquely named database owned by the role on
+// the admin PostgreSQL endpoint and returns the reachable host/port.
 func CreatePostgresDatabase(ctx workflow.ActivityContext) (any, error) {
 	input := CreatePostgresDatabaseInput{}
-	err := ctx.GetInput(&input)
-	if err != nil {
+	if err := ctx.GetInput(&input); err != nil {
 		return nil, err
 	}
 
-	// Pretend we are using a real database server...
-	database := fmt.Sprintf("%s_%s", input.DatabasePrefix, uuid.NewString())
+	database := input.DatabasePrefix + "_" + shortID()
 
 	logger := slog.Default()
-	logger.Info("Creating new database", slog.String("database", database))
-	logger.Info("Granting user permission", slog.String("username", input.Username))
+	logger.Info("Creating database", slog.String("database", database), slog.String("owner", input.Username))
 
+	admin, err := newPGAdmin(ctx.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = admin.Close(ctx.Context()) }()
+
+	if err := admin.CreateDatabase(ctx.Context(), database, input.Username); err != nil {
+		return nil, err
+	}
+
+	ep := adminEndpoint()
 	return CreatePostgresDatabaseOutput{
 		Database: database,
+		Host:     ep.Host,
+		Port:     ep.Port,
 	}, nil
 }
 
@@ -143,19 +183,26 @@ type DeletePostgresDatabaseInput struct {
 type DeletePostgresDatabaseOutput struct {
 }
 
+// DeletePostgresDatabase optionally backs up (best-effort pg_dump) then drops the
+// database from the admin PostgreSQL endpoint.
 func DeletePostgresDatabase(ctx workflow.ActivityContext) (any, error) {
 	input := DeletePostgresDatabaseInput{}
-	err := ctx.GetInput(&input)
-	if err != nil {
+	if err := ctx.GetInput(&input); err != nil {
 		return nil, err
 	}
 
-	// Pretend we are using a real database server...
-
 	logger := slog.Default()
-	logger.Info("Creating a backup", slog.String("database", input.Database))
-	time.Sleep(5 * time.Second)
-	logger.Info("Deleting database", slog.String("database", input.Database))
+	logger.Info("Deleting database", slog.String("database", input.Database), slog.Bool("backup", input.CreateBackup))
+
+	admin, err := newPGAdmin(ctx.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = admin.Close(ctx.Context()) }()
+
+	if err := admin.DropDatabase(ctx.Context(), input.Database, input.CreateBackup); err != nil {
+		return nil, err
+	}
 
 	return DeletePostgresDatabaseOutput{}, nil
 }

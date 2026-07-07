@@ -14,6 +14,11 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# Per-developer environment overrides (the committed source of truth is
+# .env.example). Never commit .env — it may hold local secrets/overrides.
+.env
+.env.local
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
