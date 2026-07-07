@@ -27,6 +27,10 @@ func CallCreatePostgresUser(ctx *workflow.WorkflowContext, input CreatePostgresU
 }
 
 type CreatePostgresUserInput struct {
+	// Username, when non-empty, reuses an existing role (idempotent update): the
+	// role's password is rotated rather than a new role being created. Empty
+	// generates a fresh unique role name.
+	Username string `json:"username,omitempty"`
 }
 
 type CreatePostgresUserOutput struct {
@@ -34,15 +38,18 @@ type CreatePostgresUserOutput struct {
 	Password string `json:"password"`
 }
 
-// CreatePostgresUser provisions a unique LOGIN role on the admin PostgreSQL
-// endpoint with a freshly generated password.
+// CreatePostgresUser provisions (or, when Username is supplied, reuses) a LOGIN
+// role on the admin PostgreSQL endpoint with a freshly generated password.
 func CreatePostgresUser(ctx workflow.ActivityContext) (any, error) {
 	input := CreatePostgresUserInput{}
 	if err := ctx.GetInput(&input); err != nil {
 		return nil, err
 	}
 
-	username := "pguser_" + shortID()
+	username := input.Username
+	if username == "" {
+		username = "pguser_" + shortID()
+	}
 	password := uuid.NewString()
 
 	logger := slog.Default()
@@ -122,6 +129,10 @@ type CreatePostgresDatabaseInput struct {
 	Username       string `json:"username"`
 	Password       string `json:"password"`
 	DatabasePrefix string `json:"databasePrefix"`
+	// Database, when non-empty, reuses an existing database (idempotent update):
+	// CreateDatabase is a no-op if it already exists. Empty generates a fresh
+	// unique name from DatabasePrefix.
+	Database string `json:"database,omitempty"`
 }
 
 type CreatePostgresDatabaseOutput struct {
@@ -140,7 +151,10 @@ func CreatePostgresDatabase(ctx workflow.ActivityContext) (any, error) {
 		return nil, err
 	}
 
-	database := input.DatabasePrefix + "_" + shortID()
+	database := input.Database
+	if database == "" {
+		database = input.DatabasePrefix + "_" + shortID()
+	}
 
 	logger := slog.Default()
 	logger.Info("Creating database", slog.String("database", database), slog.String("owner", input.Username))

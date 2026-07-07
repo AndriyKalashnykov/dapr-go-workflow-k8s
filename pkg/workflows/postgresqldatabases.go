@@ -23,18 +23,21 @@ func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 		logger.Info("Creating/Updating PostgresSQL database")
 	}
 
-	// 1. Provision the login role, 2. create the database it owns (which returns
-	// the reachable host/port), then 3. publish the connection binding into
-	// Kubernetes. Ordering matters: the binding Secret carries the final
-	// credentials, so it is published last.
-	//
-	// NOTE (scaffold limitation): each Put provisions a FRESH role + database
-	// (unique random suffix) rather than reading and reusing a prior binding from
-	// request.Resource.Properties["status"]["binding"]. A real Radius recipe would
-	// reuse the existing binding on update; here a redeploy of the same resource
-	// creates new objects and leaves the old ones for PostgresSQLDatabasesDelete
-	// to reclaim. See CLAUDE.md "Known limitations".
-	credentials, err := activities.CallCreatePostgresUser(ctx, activities.CreatePostgresUserInput{})
+	// Idempotent update: if the recipe context carries a prior status.binding
+	// (the same shape PostgresSQLDatabasesDelete reads), reuse those role and
+	// database names — the role's password is rotated and the database ensured —
+	// instead of creating fresh objects and orphaning the old ones. On a first
+	// Put the bindings are empty, so fresh unique names are generated.
+	existingUser, _ := request.Resource.GetStringValue("/status/binding/username")
+	existingDatabase, _ := request.Resource.GetStringValue("/status/binding/database")
+
+	// 1. Provision (or reuse) the login role, 2. create (or ensure) the database
+	// it owns (which returns the reachable host/port), then 3. publish the
+	// connection binding into Kubernetes. Ordering matters: the binding Secret
+	// carries the final credentials, so it is published last.
+	credentials, err := activities.CallCreatePostgresUser(ctx, activities.CreatePostgresUserInput{
+		Username: existingUser,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +46,7 @@ func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 		Username:       credentials.Username,
 		Password:       credentials.Password,
 		DatabasePrefix: request.Resource.Name,
+		Database:       existingDatabase,
 	})
 	if err != nil {
 		return nil, err

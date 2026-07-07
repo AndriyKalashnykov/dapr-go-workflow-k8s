@@ -89,6 +89,9 @@ func (a *pgxAdmin) Close(ctx context.Context) error { return a.conn.Close(ctx) }
 // pgx.Identifier; the password literal is single-quote escaped (DDL cannot be
 // parameterized). CREATE ROLE errors if the role exists, so we check first.
 func (a *pgxAdmin) CreateRole(ctx context.Context, username, password string) error {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout())
+	defer cancel()
+
 	var exists bool
 	if err := a.conn.QueryRow(ctx,
 		"SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1)", username,
@@ -116,6 +119,9 @@ func (a *pgxAdmin) CreateRole(ctx context.Context, username, password string) er
 
 // CreateDatabase creates the database owned by owner (idempotent).
 func (a *pgxAdmin) CreateDatabase(ctx context.Context, database, owner string) error {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout())
+	defer cancel()
+
 	var exists bool
 	if err := a.conn.QueryRow(ctx,
 		"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", database,
@@ -143,7 +149,11 @@ func (a *pgxAdmin) DropDatabase(ctx context.Context, database string, backup boo
 	if backup {
 		a.backupDatabase(ctx, database)
 	}
-	_, err := a.conn.Exec(ctx, fmt.Sprintf(
+	// Bound only the DROP itself (the best-effort backup above may legitimately
+	// take longer than a single-statement timeout).
+	dctx, cancel := context.WithTimeout(ctx, opTimeout())
+	defer cancel()
+	_, err := a.conn.Exec(dctx, fmt.Sprintf(
 		"DROP DATABASE IF EXISTS %s WITH (FORCE)",
 		pgx.Identifier{database}.Sanitize()))
 	if err != nil {
@@ -154,6 +164,9 @@ func (a *pgxAdmin) DropDatabase(ctx context.Context, database string, backup boo
 
 // DropRole drops the role idempotently.
 func (a *pgxAdmin) DropRole(ctx context.Context, username string) error {
+	ctx, cancel := context.WithTimeout(ctx, opTimeout())
+	defer cancel()
+
 	_, err := a.conn.Exec(ctx, fmt.Sprintf(
 		"DROP ROLE IF EXISTS %s", pgx.Identifier{username}.Sanitize()))
 	if err != nil {
