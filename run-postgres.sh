@@ -14,6 +14,7 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-daprrulz}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-postgres}"
 POSTGRES_DB="${POSTGRES_DB:-sample_state}"
+POSTGRES_STATE_IMAGE="${POSTGRES_STATE_IMAGE:-postgres:18-alpine}"
 
 echo "Starting database..."
 
@@ -28,7 +29,7 @@ docker run \
   -v "$SCRIPT_DIR/db/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh" \
   --rm \
   -d \
-  postgres
+  "$POSTGRES_STATE_IMAGE"
 
 # Wait until the init scripts have run and the target DB accepts connections —
 # daprd's state.postgresql component pings the DB on startup and fatals if it

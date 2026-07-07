@@ -65,12 +65,14 @@ make run         # ./run-dapr.sh — dapr run, app-id sample, app-port 7999, grp
 make release     # validate semver, commit version.txt, tag, push
 ```
 
-Run a single test: `go test -run '^TestName$' ./pkg/<pkg>/...`. Skip the slow 5s backup simulation: `go test -short ./...`.
+Run a single test: `go test -run '^TestName$' ./pkg/<pkg>/...`.
+
+Two test layers: `make test` (unit — hermetic, fakes + client-go's in-memory fake clientset, runs in seconds) and `make e2e` (real end-to-end — `dapr init` control plane + a kind cluster + a deployed PostgreSQL workload, runs in minutes). There is no separate integration layer; the pgx-admin and workflow-orchestration paths are covered by `make e2e`.
 
 ### Local end-to-end loop (manual)
 
 ```bash
-make postgres-start  # docker postgres on :5432 (POSTGRES_PASSWORD default daprrulz)
+make postgres-start  # docker postgres on :5432 (POSTGRES_PASSWORD from .env.example)
 make run             # starts the app under a Dapr sidecar (run-dapr.sh → go run ./cmd/main.go)
 ./start-workflow.sh  # health-check, PUT PostgresSQLDatabasesPut, poll runtimeStatus until terminal
 make postgres-stop
@@ -84,7 +86,7 @@ Because the recipe deploys a real workload, running it needs a **kubeconfig** fo
 
 - **Unit-tested**: `pkg/recipes` (100%), `pkg/activities` activity funcs (via a fake `ActivityContext`) + the real `clientsetDeployer` (object creation, idempotency, `waitAndDiscover`, delete — via client-go's in-memory fake clientset in `kubeclient_test.go`), `pkg/server`, `cmd/healthcheck`. `COVERAGE_THRESHOLD` defaults to **40%** because the pgx admin client, the deploy rollout, and the workflow-orchestration funcs are covered by `make e2e`, not unit tests.
 - **`make e2e`** is the real end-to-end test (`e2e/e2e-test.sh`): it `dapr init`s a control plane, starts the state-store PostgreSQL, **creates a kind cluster**, runs the app under a Dapr sidecar (`KUBECONFIG` → kind), schedules `PostgresSQLDatabasesPut`, and verifies the recipe **actually deployed a PostgreSQL workload**: the Deployment has a ready replica, and the provisioned role authenticates to its database **on the deployed instance** (via node-IP:NodePort). It then re-Puts (asserting idempotent reuse with no orphan) and runs `PostgresSQLDatabasesDelete`, asserting the Deployment/Service/Secret are gone. It manages its own kind cluster (`E2E_KIND_KEEP=1` keeps it). Runs in CI (the `e2e` job; kind + kubectl come from mise) and locally.
-- **Dapr runtime ≥ 1.18 is required** (`DAPR_RUNTIME_VERSION`, default 1.18.0). go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes with `required metadata dapr-callee-app-id ... not found`.
+- **Dapr runtime ≥ 1.18 is required** (pinned via `DAPR_RUNTIME_VERSION` in `.env.example` / the Makefile). The `dapr/go-sdk` + `durabletask-go` versions in `go.mod` fail activity invocation on older runtimes with `required metadata dapr-callee-app-id ... not found`.
 
 ## Skills
 

@@ -88,6 +88,10 @@ check-go-alignment:
 		exit 1; \
 	fi
 
+#check-env: @ STOPPER — fail if the committed .env.example source-of-truth is missing
+check-env:
+	@test -f .env.example || { echo "ERROR: .env.example is missing (BLOCKING) — it is the committed source of truth for every operator-tunable value."; exit 1; }
+
 #clean: @ Remove build artifacts
 clean:
 	@rm -f ./cmd/main coverage.out
@@ -147,8 +151,8 @@ mermaid-lint:
 	done; \
 	exit $$rc
 
-#static-check: @ Composite quality gate (alignment + workflow lint + lint + vuln + secrets + trivy + mermaid)
-static-check: check-go-alignment lint-ci lint vulncheck secrets trivy-fs mermaid-lint
+#static-check: @ Composite quality gate (env + alignment + workflow lint + lint + vuln + secrets + trivy + mermaid)
+static-check: check-env check-go-alignment lint-ci lint vulncheck secrets trivy-fs mermaid-lint
 	@echo "Static check passed."
 
 #test: @ Run unit tests with race detector and coverage
@@ -228,6 +232,7 @@ image-build:
 
 #image-run: @ Run the container image locally (needs a Dapr sidecar to be healthy)
 image-run: image-stop
+	@$(MAKE) --no-print-directory check-ports CHECK_PORTS="$(APP_PORT)"
 	@docker run --rm -p $(APP_PORT):$(APP_PORT) -e APP_PORT=$(APP_PORT) --name $(APP_NAME) $(IMAGE_NAME):$(IMAGE_TAG)
 
 #image-stop: @ Stop the local container
@@ -271,18 +276,22 @@ release:
 		if git ls-remote --exit-code --tags origin "refs/tags/$$newtag" >/dev/null 2>&1; then echo "ERROR: tag $$newtag already exists on origin. Pick a new version."; exit 1; fi && \
 		echo -n "Create and push $$newtag? [y/N] " && read ans && [ "$${ans:-N}" = y ] && \
 		echo $$newtag > ./version.txt && \
-		git add -A && \
-		git commit -a -s -m "Cut $$newtag release" && \
+		git add version.txt && \
+		git commit -s -m "Cut $$newtag release" && \
 		git tag -a -m "Cut $$newtag release" $$newtag && \
 		git push origin $$newtag && \
 		git push && \
 		echo "Done."'
 
+#renovate-validate: @ Validate renovate.json against the Renovate config schema
+renovate-validate:
+	@npx --yes --package renovate -- renovate-config-validator --strict
+
 #version: @ Print the current version (git tag)
 version:
 	@echo $(CURRENTTAG)
 
-.PHONY: help deps deps-check check-go-alignment clean get update format lint lint-ci \
+.PHONY: help deps deps-check check-go-alignment check-env clean get update format lint lint-ci \
 	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check check-ports e2e-deps e2e build run \
 	postgres-start postgres-stop image-build image-run image-stop image-push \
-	ci ci-run release version
+	ci ci-run renovate-validate release version
