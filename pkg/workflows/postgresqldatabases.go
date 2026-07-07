@@ -1,7 +1,6 @@
 package workflows
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/dapr/durabletask-go/workflow"
@@ -24,14 +23,17 @@ func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 		logger.Info("Creating/Updating PostgresSQL database")
 	}
 
-	deployed, err := activities.CallDeployKubernetesResources(ctx, activities.DeployKubernetesResourcesInput{
-		Namespace: request.Runtime.Kubernetes.Namespace,
-		Name:      request.Resource.Name,
-	})
-	if err != nil {
-		return nil, err
-	}
-
+	// 1. Provision the login role, 2. create the database it owns (which returns
+	// the reachable host/port), then 3. publish the connection binding into
+	// Kubernetes. Ordering matters: the binding Secret carries the final
+	// credentials, so it is published last.
+	//
+	// NOTE (scaffold limitation): each Put provisions a FRESH role + database
+	// (unique random suffix) rather than reading and reusing a prior binding from
+	// request.Resource.Properties["status"]["binding"]. A real Radius recipe would
+	// reuse the existing binding on update; here a redeploy of the same resource
+	// creates new objects and leaves the old ones for PostgresSQLDatabasesDelete
+	// to reclaim. See CLAUDE.md "Known limitations".
 	credentials, err := activities.CallCreatePostgresUser(ctx, activities.CreatePostgresUserInput{})
 	if err != nil {
 		return nil, err
@@ -46,17 +48,35 @@ func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 		return nil, err
 	}
 
+	// Build the advertised connection URI via url.URL escaping (activities.ConnectionURI)
+	// so a resource-derived database name with URL-special characters cannot corrupt it.
+	uri := activities.ConnectionURI(credentials.Username, credentials.Password, database.Host, database.Port, database.Database)
+
+	deployed, err := activities.CallDeployKubernetesResources(ctx, activities.DeployKubernetesResourcesInput{
+		Namespace: request.Runtime.Kubernetes.Namespace,
+		Name:      request.Resource.Name,
+		Host:      database.Host,
+		Port:      database.Port,
+		Username:  credentials.Username,
+		Password:  credentials.Password,
+		Database:  database.Database,
+		URI:       uri,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Return data to Radius
 	result := recipes.Result{
 		Values: map[string]any{
-			"host":     deployed.Host,
-			"port":     deployed.Port,
+			"host":     database.Host,
+			"port":     database.Port,
 			"username": credentials.Username,
 			"database": database.Database,
 		},
 		Secrets: map[string]any{
 			"password": credentials.Password,
-			"uri":      fmt.Sprintf("postgresql://%s:%s@%s:%d/%s", credentials.Username, credentials.Password, deployed.Host, deployed.Port, database.Database),
+			"uri":      uri,
 		},
 		Resources: deployed.Resources,
 	}

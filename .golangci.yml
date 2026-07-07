@@ -27,6 +27,13 @@ linters:
         - opinionated
         - performance
         - style
+      settings:
+        hugeParam:
+          # Activity/DTO structs carry connection fields (host/port/user/
+          # password/database) and are passed by value once per workflow-activity
+          # call — then JSON-serialized by durabletask anyway. The default 80-byte
+          # heuristic is too aggressive for these DTOs; raise it above the largest.
+          sizeThreshold: 160
     gosec:
       excludes:
         - G104  # unhandled errors — already covered by errcheck
@@ -37,3 +44,9 @@ linters:
       - path: _test\.go
         linters:
           - noctx
+      # Tests use repeated fixture literals and fake credentials in sample DSNs;
+      # const-extracting them adds noise and G101 flags are false positives.
+      - path: _test\.go
+        linters:
+          - goconst
+          - gosec
