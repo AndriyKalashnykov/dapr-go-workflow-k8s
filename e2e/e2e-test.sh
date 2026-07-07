@@ -167,6 +167,32 @@ SEC_URI=$(kubectl get secret "$E2E_RESOURCE_NAME" -n "$E2E_NAMESPACE" -o jsonpat
 [ "$SEC_URI" = "$URI" ] || fail "Secret uri mismatch (got '$SEC_URI')"
 echo "    Secret $E2E_RESOURCE_NAME carries the connection uri ✓"
 
+# --- Idempotent re-Put: reuse the existing binding, do not orphan ---
+echo "==> Re-Put with the existing binding (idempotent update)"
+REPUT=$(curl -s --fail-with-body -X PUT "${BASE_URL}/workflows" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"PostgresSQLDatabasesPut\",\"input\":{\"resource\":{\"name\":\"${E2E_RESOURCE_NAME}\",\"properties\":{\"status\":{\"binding\":{\"database\":\"${DB}\",\"username\":\"${USER}\"}}}},\"runtime\":{\"kubernetes\":{\"namespace\":\"${E2E_NAMESPACE}\"}}}}")
+RID2=$(jq -r '.id' <<<"$REPUT")
+[ -n "$RID2" ] && [ "$RID2" != null ] || fail "could not schedule re-Put; response: $REPUT"
+RFINAL=""
+deadline=$(( $(date +%s) + E2E_WORKFLOW_TIMEOUT_SECONDS ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  R=$(curl -s "${BASE_URL}/workflows/${RID2}")
+  case "$(jq -r '.runtimeStatus' <<<"$R")" in COMPLETED|FAILED|TERMINATED|CANCELED) RFINAL="$R"; break;; esac
+  sleep "$E2E_POLL_INTERVAL_SECONDS"
+done
+[ "$(jq -r '.runtimeStatus' <<<"$RFINAL")" = COMPLETED ] || fail "re-Put status=$(jq -r '.runtimeStatus' <<<"$RFINAL")"
+REDB=$(jq -r '.output|fromjson|.values.database' <<<"$RFINAL")
+REUSER=$(jq -r '.output|fromjson|.values.username' <<<"$RFINAL")
+{ [ "$REDB" = "$DB" ] && [ "$REUSER" = "$USER" ]; } || fail "re-Put did not reuse the binding (got $REUSER/$REDB, want $USER/$DB)"
+# Count only PROVISIONED databases (name is <resource>_<8 hex>), not the Dapr
+# state-store DBs sample_state / sample_metadata. Reuse ⇒ 1; a broken re-Put
+# that created a fresh database ⇒ 2.
+COUNT=$(docker exec "$POSTGRES_CONTAINER" psql -U "$PG_ADMIN_USER" -tAc \
+  "SELECT count(*) FROM pg_database WHERE datname ~ '^${E2E_RESOURCE_NAME}_[0-9a-f]{8}\$'")
+[ "$COUNT" = "1" ] || fail "expected exactly 1 provisioned database after re-Put, got $COUNT (orphan leak)"
+echo "    re-Put reused $USER / $DB with no orphan (1 database) ✓"
+
 # --- Delete: tear the database down ---
 echo "==> Scheduling PostgresSQLDatabasesDelete"
 DEL=$(curl -s --fail-with-body -X PUT "${BASE_URL}/workflows" \

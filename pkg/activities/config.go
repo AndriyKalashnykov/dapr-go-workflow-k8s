@@ -3,7 +3,15 @@ package activities
 import (
 	"os"
 	"strconv"
+	"time"
 )
+
+// opTimeout bounds an individual DDL statement (CREATE/DROP ROLE/DATABASE) so a
+// statement blocked on a lock cannot hang the activity indefinitely. Env-tunable
+// via PG_OP_TIMEOUT_SECONDS.
+func opTimeout() time.Duration {
+	return time.Duration(atoiOr(env("PG_OP_TIMEOUT_SECONDS", "30"), 30)) * time.Second
+}
 
 // postgresName is the literal "postgres" used, by PostgreSQL convention, as the
 // default superuser, the maintenance database, the connection URL scheme, and

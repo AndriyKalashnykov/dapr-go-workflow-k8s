@@ -171,6 +171,45 @@ func TestCreatePostgresDatabase(t *testing.T) {
 	}
 }
 
+func TestCreatePostgresUserReusesExistingRole(t *testing.T) {
+	fake := newFakePGAdmin()
+	withFakePGAdmin(t, fake)
+
+	out, err := CreatePostgresUser(fakeActivityCtx{input: CreatePostgresUserInput{Username: "pguser_keep"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := out.(CreatePostgresUserOutput)
+	if got.Username != "pguser_keep" {
+		t.Errorf("username = %q, want reused pguser_keep", got.Username)
+	}
+	if got.Password == "" {
+		t.Error("expected a rotated (freshly generated) password on reuse")
+	}
+	if fake.createdRoles["pguser_keep"] != got.Password {
+		t.Errorf("CreateRole not called with reused username + new password: %+v", fake.createdRoles)
+	}
+}
+
+func TestCreatePostgresDatabaseReusesExisting(t *testing.T) {
+	fake := newFakePGAdmin()
+	withFakePGAdmin(t, fake)
+
+	out, err := CreatePostgresDatabase(fakeActivityCtx{input: CreatePostgresDatabaseInput{
+		Username: "u", Password: "p", DatabasePrefix: "orders", Database: "orders_keep",
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := out.(CreatePostgresDatabaseOutput)
+	if got.Database != "orders_keep" {
+		t.Errorf("database = %q, want reused orders_keep", got.Database)
+	}
+	if fake.createdDBs["orders_keep"] != "u" {
+		t.Errorf("CreateDatabase not called with reused database: %+v", fake.createdDBs)
+	}
+}
+
 func TestDeletePostgresUser(t *testing.T) {
 	fake := newFakePGAdmin()
 	withFakePGAdmin(t, fake)

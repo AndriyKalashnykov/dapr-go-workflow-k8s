@@ -10,11 +10,22 @@ Go service that drives **Radius Recipes** via **Dapr durable workflows**. It exp
 
 > **The activities call real backends.** `pkg/activities/postgres.go` runs real DDL via **pgx/v5** against a PostgreSQL admin endpoint (`CREATE ROLE` / `CREATE DATABASE` / `DROP … WITH (FORCE)` / `DROP ROLE`), and `pkg/activities/kubernetes.go` publishes a real **Service + Secret** binding into the cluster via **client-go** (removed on delete). The returned recipe URI is genuinely connectable (built with `url.URL` escaping via `activities.ConnectionURI`). Backend clients are constructed through injectable package-level constructors (`newPGAdmin`, `newKubeBinder`) so activities are unit-tested hermetically against fakes; the real path is exercised by `make e2e`. The remaining extension point is swapping the Kubernetes binding for a full workload deploy (Deployment/StatefulSet) and wiring cloud-provider scopes (`recipes.ProviderAzure`/`ProviderAWS`).
 
+### Update idempotency & timeouts
+
+`PostgresSQLDatabasesPut` is **update-idempotent**: it reads the prior
+`status.binding` (`username`/`database`) from the recipe context — the same shape
+`PostgresSQLDatabasesDelete` reads — and reuses those role/database names on a
+redeploy (the role password is rotated, the database ensured) instead of creating
+fresh objects and orphaning the old ones. A first Put (empty binding) generates
+fresh unique names.
+
+Individual DDL statements are bounded by `PG_OP_TIMEOUT_SECONDS` (default 30s) so a
+statement blocked on a lock cannot hang the activity; the admin dial is bounded
+separately by `PG_CONNECT_TIMEOUT_SECONDS`.
+
 ### Known limitations (scaffold)
 
-- **`PostgresSQLDatabasesPut` is not update-idempotent.** Each Put provisions a fresh role + database (unique random suffix) instead of reading and reusing a prior binding from `Resource.Properties.status.binding`. A redeploy of the same resource creates new objects and leaves the old ones for `PostgresSQLDatabasesDelete` to reclaim. A production recipe would reuse the existing binding on update.
 - **Delete's backup is best-effort.** `DeletePostgresDatabase` runs `pg_dump` only if the binary is on `PATH`; a missing/failed backup is logged (`Warn`) and the `DROP DATABASE … WITH (FORCE)` proceeds regardless — the drop is the required side effect, the backup is advisory.
-- **Only the admin dial is timeout-bounded.** `PG_CONNECT_TIMEOUT_SECONDS` bounds `pgx.Connect`; individual DDL statements run under the Dapr activity context (bounded by the runtime's activity timeout, not a per-statement deadline).
 
 ## Architecture
 
