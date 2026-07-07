@@ -204,6 +204,10 @@ check-ports:
 	[ $$rc -eq 0 ] || exit 1; \
 	echo "Ports available: $(CHECK_PORTS)"
 
+#integration-test: @ Integration tests: real Postgres via Testcontainers (Docker required; NOT in `make ci`/`ci-run`)
+integration-test: deps
+	@export GOFLAGS=$(GOFLAGS); go test -tags=integration -race ./pkg/activities/...
+
 #e2e: @ End-to-end test: run the workflow through a real Dapr sidecar
 e2e: check-ports build e2e-deps postgres-start
 	@bash e2e/e2e-test.sh; rc=$$?; $(MAKE) --no-print-directory postgres-stop; exit $$rc
@@ -292,6 +296,6 @@ version:
 	@echo $(CURRENTTAG)
 
 .PHONY: help deps deps-check check-go-alignment check-env clean get update format lint lint-ci \
-	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check check-ports e2e-deps e2e build run \
+	vulncheck secrets trivy-fs mermaid-lint static-check test coverage-check check-ports e2e-deps integration-test e2e build run \
 	postgres-start postgres-stop image-build image-run image-stop image-push \
 	ci ci-run renovate-validate release version
