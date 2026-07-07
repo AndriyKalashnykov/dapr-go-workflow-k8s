@@ -117,6 +117,37 @@ jobs:
       - name: Verify coverage threshold
         run: make coverage-check
 
+  integration:
+    # Integration tests against a REAL PostgreSQL started via Testcontainers
+    # (Docker on the runner) — exercises the real pgx admin client (dialPGAdmin /
+    # pgxAdmin): the CREATE-vs-ALTER role idempotency, role-owned DB creation, and
+    # the quoteLiteral escaping against an actual PostgreSQL parser. Gated behind
+    # the `integration` build tag so `make test` / `make ci` stay hermetic; not
+    # run under act (`make ci-run` exercises only static-check/build/test).
+    needs: [changes, build, test]
+    if: |
+      !failure() && !cancelled() &&
+      (needs.changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4
+        with:
+          # Pinned: mise resolves "latest" to a tag whose release assets may not
+          # be published yet (v2026.6.7 was tagged with no linux-x64 asset → 404).
+          version: "2026.6.5"
+          install: true
+          cache: true
+      - name: Cache Go modules
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
+      - name: Integration tests
+        run: make integration-test
+
   e2e:
     # Runs the workflow through a real Dapr sidecar against REAL backends:
     # `make e2e` does `dapr init` (Docker control plane), starts PostgreSQL, and
@@ -246,7 +277,7 @@ jobs:
 
   ci-pass:
     if: always()
-    needs: [changes, static-check, build, test, e2e, docker]
+    needs: [changes, static-check, build, test, integration, e2e, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

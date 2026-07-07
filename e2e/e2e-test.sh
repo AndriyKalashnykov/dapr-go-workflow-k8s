@@ -97,6 +97,21 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 done
 [ -n "$ready" ] || fail "app did not become healthy within ${E2E_READY_TIMEOUT_SECONDS}s"
 
+# --- Negative case: GET an unknown workflow id returns a well-formed HTTP
+# response (structured error), not a crash/hang. ---
+echo "==> Negative: GET /workflows/<unknown-id> returns a well-formed response"
+BOGUS_ID="does-not-exist-$(date +%s)-$RANDOM"
+NEG_BODY=$(mktemp -t dapr-e2e-neg.XXXXXX)
+NEG_CODE=$(curl -s -o "$NEG_BODY" -w '%{http_code}' --max-time "$E2E_CURL_MAX_TIME_SECONDS" \
+  "${BASE_URL}/workflows/${BOGUS_ID}")
+case "$NEG_CODE" in
+  [1-5][0-9][0-9]) ;;  # a real HTTP status code (not 000 = no response / timeout)
+  *) rm -f "$NEG_BODY"; fail "unknown-id GET returned no valid HTTP status (code='$NEG_CODE') — app crashed or hung";;
+esac
+jq -e . "$NEG_BODY" >/dev/null 2>&1 || { rm -f "$NEG_BODY"; fail "unknown-id GET body is not valid JSON (code=$NEG_CODE)"; }
+rm -f "$NEG_BODY"
+echo "    unknown-id GET returned HTTP $NEG_CODE with a valid JSON body ✓"
+
 # --- Put: deploy the workload + provision ---
 echo "==> Scheduling PostgresSQLDatabasesPut (deploys a PostgreSQL workload)"
 PUT=$(curl -s --fail-with-body -X PUT "${BASE_URL}/workflows" \
