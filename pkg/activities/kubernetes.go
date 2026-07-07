@@ -6,13 +6,13 @@ import (
 	"github.com/dapr/durabletask-go/workflow"
 )
 
-func CallDeployKubernetesResources(ctx *workflow.WorkflowContext, input DeployKubernetesResourcesInput) (DeployKubernetesResourcesOutput, error) {
+func CallDeployKubernetesResources(ctx *workflow.WorkflowContext, input DeployKubernetesResourcesInput) (PostgresDeployment, error) {
 	task := ctx.CallActivity(DeployKubernetesResources, workflow.WithActivityInput(input))
 
-	output := DeployKubernetesResourcesOutput{}
+	output := PostgresDeployment{}
 	err := task.Await(&output)
 	if err != nil {
-		return DeployKubernetesResourcesOutput{}, err
+		return PostgresDeployment{}, err
 	}
 
 	return output, nil
@@ -21,23 +21,12 @@ func CallDeployKubernetesResources(ctx *workflow.WorkflowContext, input DeployKu
 type DeployKubernetesResourcesInput struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	// Connection info published to the cluster as a Secret so in-cluster
-	// consumers can reach the provisioned database.
-	Host     string `json:"host"`
-	Port     string `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Database string `json:"database"`
-	URI      string `json:"uri"`
 }
 
-type DeployKubernetesResourcesOutput struct {
-	Resources []string `json:"resources"`
-}
-
-// DeployKubernetesResources publishes the database binding (a Service + a Secret)
-// into the target namespace via the Kubernetes API and returns the created
-// resource ids.
+// DeployKubernetesResources deploys a real PostgreSQL workload (Deployment +
+// Service + Secret) into the target namespace and waits for it to be ready. It
+// returns a PostgresDeployment: the in-cluster Service DNS the recipe advertises
+// plus the host-reachable superuser endpoint the workflow uses to run DDL.
 func DeployKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	input := DeployKubernetesResourcesInput{}
 	if err := ctx.GetInput(&input); err != nil {
@@ -45,28 +34,22 @@ func DeployKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	}
 
 	logger := slog.Default()
-	logger.Info("Publishing Kubernetes binding",
+	logger.Info("Deploying PostgreSQL workload",
 		slog.String("namespace", input.Namespace), slog.String("name", input.Name))
 
-	binder, err := newKubeBinder(ctx.Context())
+	deployer, err := newKubeDeployer(ctx.Context())
 	if err != nil {
 		return nil, err
 	}
 
-	resources, err := binder.EnsureBinding(ctx.Context(), input.Namespace, input.Name, BindingConnection{
-		Host:     input.Host,
-		Port:     input.Port,
-		Username: input.Username,
-		Password: input.Password,
-		Database: input.Database,
-		URI:      input.URI,
-	})
+	dep, err := deployer.DeployPostgres(ctx.Context(), input.Namespace, input.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Info("Published Kubernetes binding", slog.Int("resources", len(resources)))
-	return DeployKubernetesResourcesOutput{Resources: resources}, nil
+	logger.Info("PostgreSQL workload ready",
+		slog.String("host", dep.InClusterHost), slog.Int("resources", len(dep.Resources)))
+	return dep, nil
 }
 
 func CallDeleteKubernetesResources(ctx *workflow.WorkflowContext, input DeleteKubernetesResourcesInput) (DeleteKubernetesResourcesOutput, error) {
@@ -89,8 +72,8 @@ type DeleteKubernetesResourcesInput struct {
 type DeleteKubernetesResourcesOutput struct {
 }
 
-// DeleteKubernetesResources removes the database binding (Service + Secret) from
-// the target namespace via the Kubernetes API.
+// DeleteKubernetesResources destroys the PostgreSQL workload (Deployment +
+// Service + Secret) — and with it the database and roles it held.
 func DeleteKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	input := DeleteKubernetesResourcesInput{}
 	if err := ctx.GetInput(&input); err != nil {
@@ -98,15 +81,15 @@ func DeleteKubernetesResources(ctx workflow.ActivityContext) (any, error) {
 	}
 
 	logger := slog.Default()
-	logger.Info("Deleting Kubernetes binding",
+	logger.Info("Deleting PostgreSQL workload",
 		slog.String("namespace", input.Namespace), slog.String("name", input.Name))
 
-	binder, err := newKubeBinder(ctx.Context())
+	deployer, err := newKubeDeployer(ctx.Context())
 	if err != nil {
 		return nil, err
 	}
 
-	if err := binder.DeleteBinding(ctx.Context(), input.Namespace, input.Name); err != nil {
+	if err := deployer.DeletePostgres(ctx.Context(), input.Namespace, input.Name); err != nil {
 		return nil, err
 	}
 

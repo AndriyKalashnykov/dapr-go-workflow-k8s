@@ -3,12 +3,8 @@ package activities
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,17 +16,13 @@ import (
 type pgAdmin interface {
 	CreateRole(ctx context.Context, username, password string) error
 	CreateDatabase(ctx context.Context, database, owner string) error
-	DropDatabase(ctx context.Context, database string, backup bool) error
-	DropRole(ctx context.Context, username string) error
 	Close(ctx context.Context) error
 }
 
 // newPGAdmin constructs a pgAdmin connected to the admin endpoint. It is a
 // package-level variable so tests can substitute a fake (hermetic unit tests,
 // no network); production code never reassigns it.
-var newPGAdmin = func(ctx context.Context) (pgAdmin, error) {
-	return dialPGAdmin(ctx, adminEndpoint())
-}
+var newPGAdmin = dialPGAdmin
 
 // connectTimeout bounds the admin connection dial (env-tunable).
 func connectTimeout() time.Duration {
@@ -140,66 +132,6 @@ func (a *pgxAdmin) CreateDatabase(ctx context.Context, database, owner string) e
 		return fmt.Errorf("creating database %q: %w", database, err)
 	}
 	return nil
-}
-
-// DropDatabase optionally takes a best-effort logical backup (pg_dump, if the
-// binary is on PATH) then drops the database. WITH (FORCE) terminates lingering
-// connections (PostgreSQL 13+).
-func (a *pgxAdmin) DropDatabase(ctx context.Context, database string, backup bool) error {
-	if backup {
-		a.backupDatabase(ctx, database)
-	}
-	// Bound only the DROP itself (the best-effort backup above may legitimately
-	// take longer than a single-statement timeout).
-	dctx, cancel := context.WithTimeout(ctx, opTimeout())
-	defer cancel()
-	_, err := a.conn.Exec(dctx, fmt.Sprintf(
-		"DROP DATABASE IF EXISTS %s WITH (FORCE)",
-		pgx.Identifier{database}.Sanitize()))
-	if err != nil {
-		return fmt.Errorf("dropping database %q: %w", database, err)
-	}
-	return nil
-}
-
-// DropRole drops the role idempotently.
-func (a *pgxAdmin) DropRole(ctx context.Context, username string) error {
-	ctx, cancel := context.WithTimeout(ctx, opTimeout())
-	defer cancel()
-
-	_, err := a.conn.Exec(ctx, fmt.Sprintf(
-		"DROP ROLE IF EXISTS %s", pgx.Identifier{username}.Sanitize()))
-	if err != nil {
-		return fmt.Errorf("dropping role %q: %w", username, err)
-	}
-	return nil
-}
-
-// backupDatabase runs pg_dump to PG_BACKUP_DIR when the tool is available. It is
-// best-effort: a missing pg_dump logs a skip rather than failing the delete
-// (the drop is the real, required side effect). The admin password is passed via
-// PGPASSWORD in the child env, never on argv (secret-handling rule).
-func (a *pgxAdmin) backupDatabase(ctx context.Context, database string) {
-	logger := slog.Default()
-	pgDump, err := exec.LookPath("pg_dump")
-	if err != nil {
-		logger.Info("pg_dump not found on PATH; skipping backup", slog.String("database", database))
-		return
-	}
-	dir := env("PG_BACKUP_DIR", os.TempDir())
-	outFile := filepath.Join(dir, database+".sql")
-	// #nosec G204 -- pgDump is resolved via LookPath; args are the configured
-	// admin endpoint and a server-generated database name, not external input.
-	cmd := exec.CommandContext(ctx, pgDump,
-		"-h", a.endpoint.Host, "-p", a.endpoint.Port, "-U", a.endpoint.User,
-		"-d", database, "-f", outFile)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+a.endpoint.Password)
-	if err := cmd.Run(); err != nil {
-		logger.Warn("pg_dump backup failed; proceeding with drop",
-			slog.String("database", database), slog.Any("error", err))
-		return
-	}
-	logger.Info("Created database backup", slog.String("database", database), slog.String("file", outFile))
 }
 
 // quoteLiteral single-quotes a string literal for inline DDL, escaping embedded

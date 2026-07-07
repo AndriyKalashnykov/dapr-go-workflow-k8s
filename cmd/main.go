@@ -92,14 +92,8 @@ func registerWorkflows(ctx context.Context, wfClient *workflow.Client) error {
 	if err := r.AddActivity(activities.CreatePostgresUser); err != nil {
 		return fmt.Errorf("error registering activity CreatePostgresUser: %w", err)
 	}
-	if err := r.AddActivity(activities.DeletePostgresUser); err != nil {
-		return fmt.Errorf("error registering activity DeletePostgresUser: %w", err)
-	}
 	if err := r.AddActivity(activities.CreatePostgresDatabase); err != nil {
 		return fmt.Errorf("error registering activity CreatePostgresDatabase: %w", err)
-	}
-	if err := r.AddActivity(activities.DeletePostgresDatabase); err != nil {
-		return fmt.Errorf("error registering activity DeletePostgresDatabase: %w", err)
 	}
 
 	if err := wfClient.StartWorker(ctx, r); err != nil {

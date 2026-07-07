@@ -14,6 +14,15 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)(?: extractVersion=(?<extractVersion>[^\\s]+))?(?: registryUrl=(?<registryUrl>[^\\s]+))?(?: versioning=(?<versioning>[^\\s]+))?\\n[A-Z0-9_]+\\s*[?:]?=\\s*(?<currentValue>[\\w][\\w.+-]*)"
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "Track the deployed PostgreSQL workload image (the Go default in workloadImage() and the .env.example mirror) via inline renovate comments.",
+      "managerFilePatterns": ["pkg/activities/config.go", "/^\\.env\\.example$/"],
+      "matchStrings": [
+        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"[^:\"]+:(?<currentValue>[^\"]+)\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+[A-Z_]+=[^:\\s]+:(?<currentValue>\\S+)"
+      ]
     }
   ],
   "commitMessagePrefix": "chore(all): ",

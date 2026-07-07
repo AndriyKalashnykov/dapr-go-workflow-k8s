@@ -23,58 +23,63 @@ func PostgresSQLDatabasesPut(ctx *workflow.WorkflowContext) (any, error) {
 		logger.Info("Creating/Updating PostgresSQL database")
 	}
 
-	// Idempotent update: if the recipe context carries a prior status.binding
-	// (the same shape PostgresSQLDatabasesDelete reads), reuse those role and
-	// database names — the role's password is rotated and the database ensured —
-	// instead of creating fresh objects and orphaning the old ones. On a first
-	// Put the bindings are empty, so fresh unique names are generated.
-	existingUser, _ := request.Resource.GetStringValue("/status/binding/username")
-	existingDatabase, _ := request.Resource.GetStringValue("/status/binding/database")
+	namespace := request.Runtime.Kubernetes.Namespace
+	name := request.Resource.Name
 
-	// 1. Provision (or reuse) the login role, 2. create (or ensure) the database
-	// it owns (which returns the reachable host/port), then 3. publish the
-	// connection binding into Kubernetes. Ordering matters: the binding Secret
-	// carries the final credentials, so it is published last.
-	credentials, err := activities.CallCreatePostgresUser(ctx, activities.CreatePostgresUserInput{
-		Username: existingUser,
+	// 1. Deploy the PostgreSQL workload (Deployment + Service + Secret) and wait
+	// for it to be ready. This returns the in-cluster Service DNS consumers use
+	// AND a host-reachable superuser endpoint used to run the provisioning DDL.
+	deployed, err := activities.CallDeployKubernetesResources(ctx, activities.DeployKubernetesResourcesInput{
+		Namespace: namespace,
+		Name:      name,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	admin := activities.AdminConn{
+		AdminHost:     deployed.ReachableHost,
+		AdminPort:     deployed.ReachablePort,
+		AdminUser:     deployed.AdminUser,
+		AdminPassword: deployed.AdminPassword,
+	}
+
+	// Idempotent update: if the recipe context carries a prior status.binding,
+	// reuse those role and database names on the (now redeployed) instance — the
+	// role's password is rotated, the database ensured. A first Put has empty
+	// bindings, so fresh unique names are generated.
+	existingUser, _ := request.Resource.GetStringValue("/status/binding/username")
+	existingDatabase, _ := request.Resource.GetStringValue("/status/binding/database")
+
+	// 2. Provision (or reuse) the login role on the deployed instance.
+	credentials, err := activities.CallCreatePostgresUser(ctx, activities.CreatePostgresUserInput{
+		AdminConn: admin,
+		Username:  existingUser,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Create (or ensure) the database it owns.
 	database, err := activities.CallCreatePostgresDatabase(ctx, activities.CreatePostgresDatabaseInput{
+		AdminConn:      admin,
 		Username:       credentials.Username,
-		Password:       credentials.Password,
-		DatabasePrefix: request.Resource.Name,
+		DatabasePrefix: name,
 		Database:       existingDatabase,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Build the advertised connection URI via url.URL escaping (activities.ConnectionURI)
-	// so a resource-derived database name with URL-special characters cannot corrupt it.
-	uri := activities.ConnectionURI(credentials.Username, credentials.Password, database.Host, database.Port, database.Database)
+	// The recipe advertises the in-cluster Service DNS (what consumers connect
+	// to). ConnectionURI's url.URL escaping keeps a resource-derived database name
+	// from corrupting the connection string.
+	uri := activities.ConnectionURI(credentials.Username, credentials.Password, deployed.InClusterHost, deployed.Port, database.Database)
 
-	deployed, err := activities.CallDeployKubernetesResources(ctx, activities.DeployKubernetesResourcesInput{
-		Namespace: request.Runtime.Kubernetes.Namespace,
-		Name:      request.Resource.Name,
-		Host:      database.Host,
-		Port:      database.Port,
-		Username:  credentials.Username,
-		Password:  credentials.Password,
-		Database:  database.Database,
-		URI:       uri,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Return data to Radius
 	result := recipes.Result{
 		Values: map[string]any{
-			"host":     database.Host,
-			"port":     database.Port,
+			"host":     deployed.InClusterHost,
+			"port":     deployed.Port,
 			"username": credentials.Username,
 			"database": database.Database,
 		},
@@ -103,27 +108,9 @@ func PostgresSQLDatabasesDelete(ctx *workflow.WorkflowContext) (any, error) {
 		logger.Info("Deleting PostgresSQL database")
 	}
 
-	database, ok := request.Resource.GetStringValue("/status/binding/database")
-	if ok {
-		_, err = activities.CallDeletePostgresDatabase(ctx, activities.DeletePostgresDatabaseInput{
-			Database:     database,
-			CreateBackup: true,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	username, ok := request.Resource.GetStringValue("/status/binding/username")
-	if ok {
-		_, err = activities.CallDeletePostgresUser(ctx, activities.DeletePostgresUserInput{
-			Username: username,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
+	// Destroying the workload (Deployment + Service + Secret) destroys the
+	// PostgreSQL instance and every role/database it held — no per-object drop
+	// needed.
 	_, err = activities.CallDeleteKubernetesResources(ctx, activities.DeleteKubernetesResourcesInput{
 		Namespace: request.Runtime.Kubernetes.Namespace,
 		Name:      request.Resource.Name,
