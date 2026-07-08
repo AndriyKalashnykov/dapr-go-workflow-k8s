@@ -57,6 +57,7 @@ Toolchain and quality tools are managed by **mise** (`.mise.toml`); `make deps` 
 make ci          # deps + format + static-check + test + coverage-check + build
 make build       # CGO_ENABLED=0 GOOS=linux GOARCH=amd64 → ./cmd/main
 make test        # go test -race -coverprofile=coverage.out ./...
+make integration-test # pgx admin client vs a Testcontainers postgres:18-alpine (-tags=integration; needs Docker)
 make static-check# composite quality gate
 make e2e         # real end-to-end: kind + Postgres + Dapr, provisions & tears down
 make check-ports # fail early if a guarded host port (Postgres/app/grpc) is taken
@@ -67,7 +68,7 @@ make release     # validate semver, commit version.txt, tag, push
 
 Run a single test: `go test -run '^TestName$' ./pkg/<pkg>/...`.
 
-Two test layers: `make test` (unit — hermetic, fakes + client-go's in-memory fake clientset, runs in seconds) and `make e2e` (real end-to-end — `dapr init` control plane + a kind cluster + a deployed PostgreSQL workload, runs in minutes). There is no separate integration layer; the pgx-admin and workflow-orchestration paths are covered by `make e2e`.
+Three test layers: `make test` (unit — hermetic, fakes + client-go's in-memory fake clientset, runs in seconds), `make integration-test` (integration — the real pgx admin client against a Testcontainers `postgres:18-alpine` on a dynamic port, `//go:build integration`, needs Docker, runs in tens of seconds; NOT in `make ci`), and `make e2e` (real end-to-end — `dapr init` control plane + a kind cluster + a deployed PostgreSQL workload, runs in minutes). The pgx-admin SQL branches are covered by `make integration-test`; the deploy-rollout and workflow-orchestration funcs by `make e2e`.
 
 ### Local end-to-end loop (manual)
 
@@ -84,7 +85,7 @@ Because the recipe deploys a real workload, running it needs a **kubeconfig** fo
 
 ## Testing notes
 
-- **Unit-tested**: `pkg/recipes` (100%), `pkg/activities` activity funcs (via a fake `ActivityContext`) + the real `clientsetDeployer` (object creation, idempotency, `waitAndDiscover`, delete — via client-go's in-memory fake clientset in `kubeclient_test.go`), `pkg/server`, `cmd/healthcheck`. `COVERAGE_THRESHOLD` defaults to **40%** because the pgx admin client, the deploy rollout, and the workflow-orchestration funcs are covered by `make e2e`, not unit tests.
+- **Unit-tested**: `pkg/recipes` (100%), `pkg/activities` activity funcs (via a fake `ActivityContext`) + the real `clientsetDeployer` (object creation, idempotency, `waitAndDiscover`, delete — via client-go's in-memory fake clientset in `kubeclient_test.go`), `pkg/server`, `cmd/healthcheck`. `COVERAGE_THRESHOLD` defaults to **40%** because the pgx admin client is covered by `make integration-test` (Testcontainers, `//go:build integration`) and the deploy rollout + workflow-orchestration funcs by `make e2e` — not by the default (tag-excluded) unit build.
 - **`make e2e`** is the real end-to-end test (`e2e/e2e-test.sh`): it `dapr init`s a control plane, starts the state-store PostgreSQL, **creates a kind cluster**, runs the app under a Dapr sidecar (`KUBECONFIG` → kind), schedules `PostgresSQLDatabasesPut`, and verifies the recipe **actually deployed a PostgreSQL workload**: the Deployment has a ready replica, and the provisioned role authenticates to its database **on the deployed instance** (via node-IP:NodePort). It then re-Puts (asserting idempotent reuse with no orphan) and runs `PostgresSQLDatabasesDelete`, asserting the Deployment/Service/Secret are gone. It manages its own kind cluster (`E2E_KIND_KEEP=1` keeps it). Runs in CI (the `e2e` job; kind + kubectl come from mise) and locally.
 - **Dapr runtime ≥ 1.18 is required** (pinned via `DAPR_RUNTIME_VERSION` in `.env.example` / the Makefile). The `dapr/go-sdk` + `durabletask-go` versions in `go.mod` fail activity invocation on older runtimes with `required metadata dapr-callee-app-id ... not found`.
 
