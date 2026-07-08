@@ -147,6 +147,7 @@ Run `make help` to see all targets.
 |--------|-------------|
 | `make test` | Unit tests with race detector + coverage (seconds; hermetic — fakes + client-go fake clientset) |
 | `make coverage-check` | Verify coverage meets `COVERAGE_THRESHOLD` (default 40%) |
+| `make integration-test` | Integration tests for the pgx admin client against a real `postgres:18-alpine` via Testcontainers (`-tags=integration`; tens of seconds; needs Docker). Not part of `make ci` |
 | `make e2e-deps` | Ensure the Dapr control plane (placement + scheduler) is up |
 | `make e2e` | End-to-end: real Dapr sidecar + a kind cluster; deploys a PostgreSQL workload, verifies the role/DB on it + idempotent re-Put, then destroys the workload (minutes; needs Docker + Dapr CLI) |
 
@@ -189,11 +190,11 @@ Run `make help` to see all targets.
 
 | Workflow | Trigger | Jobs |
 |----------|---------|------|
-| `ci.yml` | push to `main`, `v*` tags, PRs | `changes` → `static-check` / `build` / `test` / `e2e` → `docker` → `ci-pass` |
+| `ci.yml` | push to `main`, `v*` tags, PRs | `changes` → `static-check` / `build` / `test` / `integration` / `e2e` → `docker` → `ci-pass` |
 | `release.yml` | `v*.*.*` tags | reuses `ci.yml`, then GoReleaser publishes binaries + GitHub Release |
 | `cleanup-runs.yml` | weekly / dispatch | prunes old workflow runs and caches |
 
-The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts the state-store PostgreSQL, creates a kind cluster, runs the app under a Dapr sidecar, and asserts the recipe **actually deployed a PostgreSQL workload** (ready Deployment) and provisioned a role + database on it (the credentials authenticate over the Service's NodePort) — then re-Puts idempotently and `PostgresSQLDatabasesDelete` destroys the workload (kind + kubectl come from mise). The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
+The `e2e` job runs `make e2e`, which `dapr init`s a real control plane, starts the state-store PostgreSQL, creates a kind cluster, runs the app under a Dapr sidecar, and asserts the recipe **actually deployed a PostgreSQL workload** (ready Deployment) and provisioned a role + database on it (the credentials authenticate over the Service's NodePort) — then re-Puts idempotently and `PostgresSQLDatabasesDelete` destroys the workload (kind + kubectl come from mise). The `integration` job runs `make integration-test` — the real pgx admin client against a Testcontainers `postgres:18-alpine` (SQL-branch coverage in seconds, no cluster). The `docker` job builds the image and runs a blocking Trivy scan on every push; on a tag it publishes a cosign-signed `linux/amd64` image to `ghcr.io/andriykalashnykov/dapr-go-workflow-k8s`. Branch protection requires the `ci-pass` check before merging (including for Renovate automerge).
 
 > **Dapr runtime ≥ 1.18 is required.** go-sdk v1.15 / durabletask-go v0.12 fail activity invocation on older runtimes (`required metadata dapr-callee-app-id ... not found`). `make e2e` installs the version pinned by `DAPR_RUNTIME_VERSION` (default 1.18.0).
 
